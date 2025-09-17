@@ -11,7 +11,7 @@ from mani_skill2_real2sim.utils.common import random_choice
 from mani_skill2_real2sim.utils.registration import register_env
 from mani_skill2_real2sim.utils.sapien_utils import vectorize_pose
 
-from .base_env import CustomSceneEnv, CustomOtherObjectsInSceneEnv
+from .base_env import CustomOtherObjectsInSceneEnv, CustomSceneEnv
 
 
 class GraspSingleInSceneEnv(CustomSceneEnv):
@@ -63,14 +63,30 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
 
         super().__init__(**kwargs)
 
+        # Add dummy background visual objects
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[5, 5, 0.87], color=[0.05, 0.05, 0.05])
+        dummy_table = builder.build_static()
+        dummy_table.set_pose(sapien.Pose([0, 0, 0.019], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_left = builder.build_static()
+        dummy_left.set_pose(sapien.Pose([0, -0.28, 0], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_right = builder.build_static()
+        dummy_right.set_pose(sapien.Pose([0, 0.76, 0], [0, 0, 0, 1]))
+
     def _setup_prepackaged_env_init_config(self):
         ret = {}
         ret["robot"] = "google_robot_static"
         ret["control_freq"] = 3
         ret["sim_freq"] = 513
-        ret["control_mode"] = (
-            "arm_pd_ee_delta_pose_align_interpolate_by_planner_gripper_pd_joint_target_delta_pos_interpolate_by_planner"
-        )
+        ret[
+            "control_mode"
+        ] = "arm_pd_ee_delta_pose_align_interpolate_by_planner_gripper_pd_joint_target_delta_pos_interpolate_by_planner"
         ret["scene_name"] = "google_pick_coke_can_1_v4"
         ret["camera_cfgs"] = {"add_segmentation": True}
         ret["rgb_overlay_path"] = str(
@@ -112,7 +128,9 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
         _reconfigure = self._set_model(model_id, model_scale)
         reconfigure = _reconfigure or reconfigure
         if self.distractor_model_ids is not None:
-            distractor_model_scales = options.get("distractor_model_scales", None)
+            distractor_model_scales = options.get(
+                "distractor_model_scales", None
+            )
             distractor_model_ids = options.get("distractor_model_ids", None)
             if distractor_model_ids is not None:
                 reconfigure = True
@@ -248,7 +266,9 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
 
         return reconfigure
 
-    def _set_distractor_models(self, distractor_model_ids, distractor_model_scales):
+    def _set_distractor_models(
+        self, distractor_model_ids, distractor_model_scales
+    ):
         assert distractor_model_ids is not None
 
         self.selected_distractor_model_ids = distractor_model_ids
@@ -269,10 +289,16 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
         # The object will fall from a certain initial height
         obj_init_xy = self.obj_init_options.get("init_xy", None)
         if obj_init_xy is None:
-            obj_init_xy = self._episode_rng.uniform([-0.35, -0.02], [-0.12, 0.42], [2])
-        obj_init_z = self.obj_init_options.get("init_z", self.scene_table_height)
+            obj_init_xy = self._episode_rng.uniform(
+                [-0.35, -0.02], [-0.12, 0.42], [2]
+            )
+        obj_init_z = self.obj_init_options.get(
+            "init_z", self.scene_table_height
+        )
         obj_init_z = obj_init_z + 0.5  # let object fall onto the table
-        obj_init_rot_quat = self.obj_init_options.get("init_rot_quat", [1, 0, 0, 0])
+        obj_init_rot_quat = self.obj_init_options.get(
+            "init_rot_quat", [1, 0, 0, 0]
+        )
         p = np.hstack([obj_init_xy, obj_init_z])
         q = obj_init_rot_quat
 
@@ -321,20 +347,28 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
         if len(self.distractor_objs) > 0:
             # Set distractor objects
             for distractor_obj in self.distractor_objs:
-                distractor_obj_init_options = self.distractor_obj_init_options.get(
-                    distractor_obj.name, {}
+                distractor_obj_init_options = (
+                    self.distractor_obj_init_options.get(
+                        distractor_obj.name, {}
+                    )
                 )
 
-                distractor_init_xy = distractor_obj_init_options.get("init_xy", None)
+                distractor_init_xy = distractor_obj_init_options.get(
+                    "init_xy", None
+                )
                 if distractor_init_xy is None:
                     while True:
-                        distractor_init_xy = obj_init_xy + self._episode_rng.uniform(
-                            -0.3, 0.3, [2]
+                        distractor_init_xy = (
+                            obj_init_xy
+                            + self._episode_rng.uniform(-0.3, 0.3, [2])
                         )  # hardcoded for now
                         distractor_init_xy = np.clip(
                             distractor_init_xy, [-0.50, 0.05], [-0.1, 0.35]
                         )
-                        if np.linalg.norm(distractor_init_xy - obj_init_xy) > 0.25:
+                        if (
+                            np.linalg.norm(distractor_init_xy - obj_init_xy)
+                            > 0.25
+                        ):
                             break
                 p = np.hstack(
                     [distractor_init_xy, obj_init_z]
@@ -434,18 +468,24 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
         consecutive_grasp = self.consecutive_grasp >= 5
         diff_obj_height = self.obj.pose.p[2] - self.obj_height_after_settle
         self.lifted_obj = self.lifted_obj or (flag and (diff_obj_height > 0.01))
-        lifted_object_significantly = self.lifted_obj and (diff_obj_height > 0.02)
+        lifted_object_significantly = self.lifted_obj and (
+            diff_obj_height > 0.02
+        )
 
         if self.require_lifting_obj_for_success:
             success = self.lifted_obj
         else:
             success = consecutive_grasp
 
-        self.episode_stats["n_lift_significant"] += int(lifted_object_significantly)
+        self.episode_stats["n_lift_significant"] += int(
+            lifted_object_significantly
+        )
         self.episode_stats["consec_grasp"] = (
             self.episode_stats["consec_grasp"] or consecutive_grasp
         )
-        self.episode_stats["grasped"] = self.episode_stats["grasped"] or is_grasped
+        self.episode_stats["grasped"] = (
+            self.episode_stats["grasped"] or is_grasped
+        )
         if self.success_from_episode_stats:
             # During evaluation, if policy puts down coke can in the end but has lifted it significantly before, it is still a success
             # However, if you want to perform RL training on this environment, make sure to turn off this option
@@ -467,7 +507,9 @@ class GraspSingleInSceneEnv(CustomSceneEnv):
 
 
 @register_env("GraspSingleCustomInScene-v0", max_episode_steps=80)
-class GraspSingleCustomInSceneEnv(GraspSingleInSceneEnv, CustomOtherObjectsInSceneEnv):
+class GraspSingleCustomInSceneEnv(
+    GraspSingleInSceneEnv, CustomOtherObjectsInSceneEnv
+):
     def _load_model(self):
         density = self.model_db[self.model_id].get("density", 1000)
 
@@ -494,7 +536,9 @@ class GraspSingleCustomInSceneEnv(GraspSingleInSceneEnv, CustomOtherObjectsInSce
                     distractor_model_id,
                     self._scene,
                     scale=distractor_model_scale,
-                    density=self.model_db[distractor_model_id].get("density", 1000),
+                    density=self.model_db[distractor_model_id].get(
+                        "density", 1000
+                    ),
                     physical_material=self._scene.create_physical_material(
                         static_friction=self.obj_static_friction,
                         dynamic_friction=self.obj_dynamic_friction,
@@ -565,20 +609,22 @@ class GraspSingleCustomOrientationInSceneEnv(GraspSingleCustomInSceneEnv):
                     ]
                 except KeyError as e:
                     if "standing" in orientation:
-                        obj_init_options["init_rot_quat"] = self.orientations_dict[
-                            "upright"
-                        ]
+                        obj_init_options[
+                            "init_rot_quat"
+                        ] = self.orientations_dict["upright"]
                     elif "horizontal" in orientation:
-                        obj_init_options["init_rot_quat"] = self.orientations_dict[
-                            "lr_switch"
-                        ]
+                        obj_init_options[
+                            "init_rot_quat"
+                        ] = self.orientations_dict["lr_switch"]
                     else:
                         raise e
             else:
                 orientation = self._episode_rng.choice(
                     list(self.orientations_dict.keys())
                 )
-                obj_init_options["init_rot_quat"] = self.orientations_dict[orientation]
+                obj_init_options["init_rot_quat"] = self.orientations_dict[
+                    orientation
+                ]
 
         options["obj_init_options"] = obj_init_options
 
@@ -605,7 +651,7 @@ class GraspSingleRandomObjectInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
             "bridge_carrot_generated_modified",
             "green_cube_3cm",
             "yellow_cube_3cm",
-            "eggplant"
+            "eggplant",
         ]
         super().__init__(**kwargs)
 
@@ -619,7 +665,9 @@ class GraspSingleCokeCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
 
 
 @register_env("GraspSingleOpenedCokeCanInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedCokeCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleOpenedCokeCanInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     """
     Opened cans are assumed to be empty, and therefore are (1) open, (2) have much lower density than unopened cans (50 vs 1000)
     """
@@ -630,8 +678,12 @@ class GraspSingleOpenedCokeCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv)
         super().__init__(**kwargs)
 
 
-@register_env("GraspSingleAltDensityOpenedCokeCanInScene-v0", max_episode_steps=80)
-class GraspSingleAltDensityOpenedCokeCanInSceneEnv(GraspSingleOpenedCokeCanInSceneEnv):
+@register_env(
+    "GraspSingleAltDensityOpenedCokeCanInScene-v0", max_episode_steps=80
+)
+class GraspSingleAltDensityOpenedCokeCanInSceneEnv(
+    GraspSingleOpenedCokeCanInSceneEnv
+):
     def __init__(self, density=100, **kwargs):
         # Original density is 50, corresponding to 20g mass for an empty opened coke can
         model_db_override = {"opened_coke_can": {"density": density}}
@@ -652,7 +704,9 @@ class GraspSingleDummyEnv(GraspSingleOpenedCokeCanInSceneEnv):
         return super().reset(seed=seed, options=options)
 
 
-@register_env("GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0", max_episode_steps=80)
+@register_env(
+    "GraspSingleOpenedCokeCanAltGoogleCameraInScene-v0", max_episode_steps=80
+)
 class GraspSingleOpenedCokeCanAltGoogleCameraInSceneEnv(
     GraspSingleOpenedCokeCanInSceneEnv
 ):
@@ -708,8 +762,12 @@ class GraspSingleOpenedCokeCanAltGoogleCamera2InSceneEnv(
         return super().reset(seed=seed, options=options)
 
 
-@register_env("GraspSingleOpenedCokeCanDistractorInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedCokeCanDistractorInSceneEnv(GraspSingleOpenedCokeCanInSceneEnv):
+@register_env(
+    "GraspSingleOpenedCokeCanDistractorInScene-v0", max_episode_steps=80
+)
+class GraspSingleOpenedCokeCanDistractorInSceneEnv(
+    GraspSingleOpenedCokeCanInSceneEnv
+):
     def __init__(self, distractor_config="less", **kwargs):
         if distractor_config == "less":
             self.distractor_model_ids = [
@@ -750,7 +808,9 @@ class GraspSinglePepsiCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
 
 
 @register_env("GraspSingleOpenedPepsiCanInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedPepsiCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleOpenedPepsiCanInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     def __init__(self, **kwargs):
         kwargs.pop("model_ids", None)
         kwargs["model_ids"] = ["opened_pepsi_can"]
@@ -782,7 +842,9 @@ class GraspSingleSpriteCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
 
 
 @register_env("GraspSingleOpenedSpriteCanInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedSpriteCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleOpenedSpriteCanInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     def __init__(self, **kwargs):
         kwargs.pop("model_ids", None)
         kwargs["model_ids"] = ["opened_sprite_can"]
@@ -798,7 +860,9 @@ class GraspSingleFantaCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
 
 
 @register_env("GraspSingleOpenedFantaCanInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedFantaCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleOpenedFantaCanInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     def __init__(self, **kwargs):
         kwargs.pop("model_ids", None)
         kwargs["model_ids"] = ["opened_fanta_can"]
@@ -814,7 +878,9 @@ class GraspSingleRedBullCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
 
 
 @register_env("GraspSingleOpenedRedBullCanInScene-v0", max_episode_steps=80)
-class GraspSingleOpenedRedBullCanInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleOpenedRedBullCanInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     def __init__(self, **kwargs):
         kwargs.pop("model_ids", None)
         kwargs["model_ids"] = ["opened_redbull_can"]
@@ -822,7 +888,9 @@ class GraspSingleOpenedRedBullCanInSceneEnv(GraspSingleCustomOrientationInSceneE
 
 
 @register_env("GraspSingleBluePlasticBottleInScene-v0", max_episode_steps=80)
-class GraspSingleBluePlasticBottleInSceneEnv(GraspSingleCustomOrientationInSceneEnv):
+class GraspSingleBluePlasticBottleInSceneEnv(
+    GraspSingleCustomOrientationInSceneEnv
+):
     def __init__(self, **kwargs):
         kwargs.pop("model_ids", None)
         kwargs["model_ids"] = ["blue_plastic_bottle"]

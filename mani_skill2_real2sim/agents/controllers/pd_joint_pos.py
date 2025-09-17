@@ -72,7 +72,9 @@ class PDJointPosController(BaseController):
                     self._start_qpos = self._last_drive_qpos_targets
                 self._target_qpos = self._target_qpos + action
                 if self.config.clip_target:
-                    joint_limits = self.articulation.get_qlimits()[self.joint_indices]
+                    joint_limits = self.articulation.get_qlimits()[
+                        self.joint_indices
+                    ]
                     self._target_qpos = np.clip(
                         self._target_qpos,
                         joint_limits[:, 0] - self.config.clip_target_thres,
@@ -89,7 +91,9 @@ class PDJointPosController(BaseController):
                 assert len(action) == 1
                 action = np.broadcast_to(action, self._target_qpos.shape)
             small_action_idx = np.where(np.abs(action) < 1e-3)[0]
-            self._target_qpos[small_action_idx] = _last_target_qpos[small_action_idx]
+            self._target_qpos[small_action_idx] = _last_target_qpos[
+                small_action_idx
+            ]
 
         if self.config.interpolate:
             self._setup_qpos_interpolation()
@@ -136,7 +140,10 @@ class PDJointPosController(BaseController):
             # linear interpolation
             step_size = (self._target_qpos - self._start_qpos) / self._sim_steps
             self._interpolation_path = np.array(
-                [self._start_qpos + step_size * i for i in range(self._sim_steps + 1)]
+                [
+                    self._start_qpos + step_size * i
+                    for i in range(self._sim_steps + 1)
+                ]
             )
         # print("interpolation path length", len(self._interpolation_path))
         # print("interpolation at next ctrl", self._interpolation_path[min(self._sim_steps, len(self._interpolation_path) - 1)])

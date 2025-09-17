@@ -1,13 +1,14 @@
 from collections import OrderedDict
 from typing import List, Optional
 
-import numpy as np
 import cv2
+import numpy as np
 import sapien.core as sapien
+from transforms3d.euler import euler2quat
+
 from mani_skill2_real2sim import ASSET_DIR
 from mani_skill2_real2sim.utils.registration import register_env
 from mani_skill2_real2sim.utils.sapien_utils import get_entity_by_name
-from transforms3d.euler import euler2quat
 
 from .base_env import CustomOtherObjectsInSceneEnv, CustomSceneEnv
 
@@ -65,21 +66,25 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
     #     return scene_config
 
     def _initialize_agent(self):
-        init_qpos = np.array(
-            [
-                -0.2639457174606611,
-                0.0831913360274175,
-                0.5017611504652179,
-                1.156859026208673,
-                0.028583671314766423,
-                1.592598203487462,
-                -1.080652960128774,
-                0,
-                0,
-                -0.00285961,
-                0.7851361,
-            ]
-        )
+        if self.robot_uid == "jaco":
+            init_qpos = np.array([-1.5, 2.93, 1, -2.09, 1.44, 1.32, 0.02, 0.02])
+            # init_qpos = np.array([-1.304, 4.003, 1.381, -2.234, 1.743, 1.908, 0.258, 0.258])
+        else:
+            init_qpos = np.array(
+                [
+                    -0.2639457174606611,
+                    0.0831913360274175,
+                    0.5017611504652179,
+                    1.156859026208673,
+                    0.028583671314766423,
+                    1.592598203487462,
+                    -1.080652960128774,
+                    0,
+                    0,
+                    -0.00285961,
+                    0.7851361,
+                ]
+            )
         if self.camera_mode == "variant":
             init_qpos[-2] += -0.025
             init_qpos[-1] += 0.008
@@ -93,7 +98,8 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
         self._scene.set_ambient_light([1.0, 1.0, 1.0])
         angle = 75
         self._scene.add_directional_light(
-            [-np.cos(np.deg2rad(angle)), 0, -np.sin(np.deg2rad(angle))], [1.0, 1.0, 1.0]
+            [-np.cos(np.deg2rad(angle)), 0, -np.sin(np.deg2rad(angle))],
+            # [1.0, 1.0, 1.0],
         )
 
     def _setup_lighting_legacy(self):
@@ -113,7 +119,9 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
         self._scene.set_ambient_light([0.3, 0.3, 0.3])
         # Only the first of directional lights can have shadow
         self._scene.add_directional_light(
-            direction, color, shadow=True, scale=5, shadow_map_size=2048
+            # bump up light intensity; otherwise scene looks too dark
+            # higher shadow resolution and lower scale to increase sharpness
+            direction=direction, color=[50, 50, 50], shadow=True, scale=2, shadow_map_size=8192
         )
         self._scene.add_directional_light([-1, 1, -0.05], [0.5] * 3)
         self._scene.add_directional_light([-1, -1, -0.05], [0.5] * 3)
@@ -126,9 +134,10 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
         loader = self._scene.create_urdf_loader()
         loader.fix_root_link = True
         self.art_obj = loader.load(filename)
-        self.art_obj.name = 'cabinet'
+        self.art_obj.name = "cabinet"
         # TODO: This pose can be tuned for different rendering approachs.
-        self.art_obj.set_pose(sapien.Pose([-0.295, 0, 0.017], [1, 0, 0, 0]))
+        # self.art_obj.set_pose(sapien.Pose([-0.295, 0, 0.017], [1, 0, 0, 0]))
+        self.art_obj.set_pose(sapien.Pose([-0.295, 0.21, 0.9], [1, 0, 0, 0]))
         for joint in self.art_obj.get_active_joints():
             # friction seems more important
             # joint.set_friction(0.1)
@@ -139,7 +148,9 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
             self.art_obj.get_links(), f"{self.drawer_id}_drawer"
         )
         self.joint_names = [j.name for j in self.art_obj.get_active_joints()]
-        self.joint_idx = self.joint_names.index(f"{self.drawer_id}_drawer_joint")
+        self.joint_idx = self.joint_names.index(
+            f"{self.drawer_id}_drawer_joint"
+        )
 
     def reset(self, seed=None, options=None):
         if options is None:
@@ -158,8 +169,12 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
 
         self._initialize_episode_stats()
 
-        obs, info = super().reset(seed=self._episode_seed, options=options) # articulations are loaded here
-        self.joint_idx = self.joint_names.index(f"{self.drawer_id}_drawer_joint")
+        obs, info = super().reset(
+            seed=self._episode_seed, options=options
+        )  # articulations are loaded here
+        self.joint_idx = self.joint_names.index(
+            f"{self.drawer_id}_drawer_joint"
+        )
 
         # setup cabinet qpos
         obj_init_options = options.get("obj_init_options", {})
@@ -173,7 +188,9 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
                 cabinet_init_qpos = tmp
             self.art_obj.set_qpos(cabinet_init_qpos)
         else:
-            self.art_obj.set_qpos([0.0] * self.art_obj.dof) # ensure that the drawer is closed
+            self.art_obj.set_qpos(
+                [0.04] * self.art_obj.dof
+            )  # ensure that the drawer is slightly opened to allow grabbing by rim
         obs = self.get_obs()
 
         info.update(
@@ -192,9 +209,20 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
         # use prepackaged evaluation configs under visual matching setup
         overlay_ids = ["a0", "a1", "a2", "b0", "b1", "b2", "c0", "c1", "c2"]
         rgb_overlay_paths = [
-            str(ASSET_DIR / f"real_inpainting/open_drawer_{i}.png") for i in overlay_ids
+            str(ASSET_DIR / f"real_inpainting/open_drawer_{i}.png")
+            for i in overlay_ids
         ]
-        robot_init_xs = [0.644, 0.765, 0.889, 0.652, 0.752, 0.851, 0.665, 0.765, 0.865]
+        robot_init_xs = [
+            0.644,
+            0.765,
+            0.889,
+            0.652,
+            0.752,
+            0.851,
+            0.665,
+            0.765,
+            0.865,
+        ]
         robot_init_ys = [
             -0.179,
             -0.182,
@@ -216,8 +244,11 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
                 * sapien.Pose(q=[0, 0, 0, 1])
             ).q,
         }
+        self.rgb_overlay_path = rgb_overlay_paths[idx_chosen]
         self.rgb_overlay_img = (
-            cv2.cvtColor(cv2.imread(rgb_overlay_paths[idx_chosen]), cv2.COLOR_BGR2RGB)
+            cv2.cvtColor(
+                cv2.imread(rgb_overlay_paths[idx_chosen]), cv2.COLOR_BGR2RGB
+            )
             / 255
         )
         new_urdf_version = self._episode_rng.choice(
@@ -240,14 +271,18 @@ class OpenDrawerInSceneEnv(CustomSceneEnv):
     def evaluate(self, **kwargs):
         qpos = self.art_obj.get_qpos()[self.joint_idx]
         self.episode_stats["qpos"] = "{:.3f}".format(qpos)
-        return dict(success=qpos >= 0.15, qpos=qpos, episode_stats=self.episode_stats)
+        return dict(
+            success=qpos >= 0.1, qpos=qpos, episode_stats=self.episode_stats
+        )
 
     def get_language_instruction(self, **kwargs):
         return f"open {self.drawer_id} drawer"
 
 
 @register_env("OpenDrawerCustomInScene-v0", max_episode_steps=113)
-class OpenDrawerCustomInSceneEnv(OpenDrawerInSceneEnv, CustomOtherObjectsInSceneEnv):
+class OpenDrawerCustomInSceneEnv(
+    OpenDrawerInSceneEnv, CustomOtherObjectsInSceneEnv
+):
     drawer_ids = ["top", "middle", "bottom"]
 
 
@@ -267,7 +302,6 @@ class OpenBottomDrawerCustomInSceneEnv(OpenDrawerCustomInSceneEnv):
 
 
 class CloseDrawerInSceneEnv(OpenDrawerInSceneEnv):
-
     def reset(self, seed=None, options=None):
         if options is None:
             options = dict()
@@ -280,14 +314,18 @@ class CloseDrawerInSceneEnv(OpenDrawerInSceneEnv):
     def evaluate(self, **kwargs):
         qpos = self.art_obj.get_qpos()[self.joint_idx]
         self.episode_stats["qpos"] = "{:.3f}".format(qpos)
-        return dict(success=qpos <= 0.05, qpos=qpos, episode_stats=self.episode_stats)
+        return dict(
+            success=qpos <= 0.05, qpos=qpos, episode_stats=self.episode_stats
+        )
 
     def get_language_instruction(self):
         return f"close {self.drawer_id} drawer"
 
 
 @register_env("CloseDrawerCustomInScene-v0", max_episode_steps=113)
-class CloseDrawerCustomInSceneEnv(CloseDrawerInSceneEnv, CustomOtherObjectsInSceneEnv):
+class CloseDrawerCustomInSceneEnv(
+    CloseDrawerInSceneEnv, CustomOtherObjectsInSceneEnv
+):
     drawer_ids = ["top", "middle", "bottom"]
 
 

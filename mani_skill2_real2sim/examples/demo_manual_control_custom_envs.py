@@ -89,12 +89,12 @@ import argparse
 
 import gymnasium as gym
 import numpy as np
+from sapien.core import Pose
 from transforms3d.quaternions import qmult
 
 from mani_skill2_real2sim.envs.sapien_env import BaseEnv
-from mani_skill2_real2sim.utils.visualization.cv2_utils import OpenCVViewer
 from mani_skill2_real2sim.utils.sapien_utils import look_at, normalize_vector
-from sapien.core import Pose
+from mani_skill2_real2sim.utils.visualization.cv2_utils import OpenCVViewer
 
 MS1_ENV_IDS = [
     "OpenCabinetDoor-v1",
@@ -109,7 +109,9 @@ def parse_args():
     parser.add_argument("-e", "--env-id", type=str, required=True)
     parser.add_argument("-o", "--obs-mode", type=str)
     parser.add_argument("--reward-mode", type=str)
-    parser.add_argument("-c", "--control-mode", type=str, default="pd_ee_delta_pose")
+    parser.add_argument(
+        "-c", "--control-mode", type=str, default="pd_ee_delta_pose"
+    )
     parser.add_argument("--render-mode", type=str, default="cameras")
     parser.add_argument("--add-segmentation", action="store_true")
     parser.add_argument("--enable-sapien-viewer", action="store_true")
@@ -130,7 +132,9 @@ def main():
     args = parse_args()
 
     if args.env_id in MS1_ENV_IDS:
-        if args.control_mode is not None and not args.control_mode.startswith("base"):
+        if args.control_mode is not None and not args.control_mode.startswith(
+            "base"
+        ):
             args.control_mode = "base_pd_joint_vel_arm_" + args.control_mode
 
     if "robot" in args.env_kwargs:
@@ -144,6 +148,12 @@ def main():
             args.env_kwargs["render_camera_cfgs"] = {
                 "render_camera": dict(p=pose.p, q=pose.q)
             }
+        elif "jaco" in args.env_kwargs["robot"]:
+            # pose = look_at([1.0, 1.0, 2.5], [0.0, 0.0, 0.7])
+            pose = look_at([1.0, 0.21, 0.9], [0.0, 0.21, 0.9])
+            args.env_kwargs["render_camera_cfgs"] = {
+                "render_camera": dict(p=pose.p, q=pose.q)
+            }
 
     from transforms3d.euler import euler2quat
 
@@ -154,7 +164,7 @@ def main():
         control_mode=args.control_mode,
         render_mode=args.render_mode,
         camera_cfgs={"add_segmentation": args.add_segmentation},
-        **args.env_kwargs
+        **args.env_kwargs,
     )
 
     print("Observation space", env.observation_space)
@@ -171,24 +181,47 @@ def main():
             name in args.env_id for name in name_list
         )
         if names_in_env_id_fxn(["GraspSingle"]):
-            init_rot_quat = (Pose(q=[0, 0, 0, 1])).q
-            env_reset_options = {
-                "obj_init_options": {"init_xy": [-0.12, 0.2]},
-                "robot_init_options": {
-                    "init_xy": [0.35, 0.20],
-                    "init_rot_quat": init_rot_quat,
-                },
-            }
+            if env.robot_uid == "jaco":
+                init_rot_quat = (Pose(q=[1, 0, 0, 0])).q
+                env_reset_options = {
+                    "obj_init_options": {"init_xy": [-0.12, 0.2]},
+                    "robot_init_options": {
+                        "init_xy": [-0.45, 0.6],
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
+            else:
+                init_rot_quat = (Pose(q=[0, 0, 0, 1])).q
+                env_reset_options = {
+                    "obj_init_options": {"init_xy": [-0.12, 0.2]},
+                    "robot_init_options": {
+                        "init_xy": [0.35, 0.21],
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
         elif names_in_env_id_fxn(["MoveNear"]):
-            # data/real_inpainting/google_move_near_real_eval_1.png
-            init_rot_quat = (Pose(q=euler2quat(0, 0, -0.09)) * Pose(q=[0, 0, 0, 1])).q
-            env_reset_options = {
-                "obj_init_options": {},
-                "robot_init_options": {
-                    "init_xy": [0.35, 0.21],
-                    "init_rot_quat": init_rot_quat,
-                },
-            }
+            if env.robot_uid == "jaco":
+                # data/real_inpainting/google_move_near_real_eval_1.png
+                init_rot_quat = (Pose(q=[1, 0, 0, 0])).q
+                env_reset_options = {
+                    "obj_init_options": {},
+                    "robot_init_options": {
+                        "init_xy": [-0.45, 0.6],
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
+            else:
+                # data/real_inpainting/google_move_near_real_eval_1.png
+                init_rot_quat = (
+                    Pose(q=euler2quat(0, 0, -0.09)) * Pose(q=[0, 0, 0, 1])
+                ).q
+                env_reset_options = {
+                    "obj_init_options": {},
+                    "robot_init_options": {
+                        "init_xy": [0.35, 0.21],
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
             # data/real_inpainting/google_move_near_real_eval_2.png
             # init_rot_quat = (Pose(q=euler2quat(0, 0, -0.028)) * Pose(q=[0, 0, 0, 1])).q
             # env_reset_options={'obj_init_options': {},
@@ -196,20 +229,37 @@ def main():
 
             env_reset_options["obj_init_options"]["episode_id"] = 0
         elif names_in_env_id_fxn(["Drawer"]):
-            init_rot_quat = [0, 0, 0, 1]
-            if not names_in_env_id_fxn(["PlaceInClosedDrawer"]):
-                init_xy = [0.851, 0.035]
+            if env.robot_uid == "jaco":
+                # wlh = 0.31 * 0.31 * 0.31
+                # handle wh = 0.14 * 0.03
+                init_rot_quat = (Pose(q=[1, 0, 0, 0])).q
+                env_reset_options = {
+                    "obj_init_options": {"init_xy": [0.0, 0.0]},
+                    "robot_init_options": {
+                        "init_xy": [-0.45, 0.6],
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
             else:
-                init_xy = [0.652, 0.009]
-            env_reset_options = {
-                "obj_init_options": {"init_xy": [0.0, 0.0]},
-                "robot_init_options": {
-                    "init_xy": init_xy,
-                    "init_rot_quat": init_rot_quat,
-                },
-            }
+                init_rot_quat = [0, 0, 0, 1]
+                if not names_in_env_id_fxn(["PlaceInClosedDrawer"]):
+                    init_xy = [0.851, 0.035]
+                else:
+                    init_xy = [0.652, 0.009]
+                env_reset_options = {
+                    "obj_init_options": {"init_xy": [0.0, 0.0]},
+                    "robot_init_options": {
+                        "init_xy": init_xy,
+                        "init_rot_quat": init_rot_quat,
+                    },
+                }
         elif names_in_env_id_fxn(
-            ["PutSpoonOnTableCloth", "PutCarrotOnPlate", "StackGreenCubeOnYellowCube", "PutEggplantInBasket"]
+            [
+                "PutSpoonOnTableCloth",
+                "PutCarrotOnPlate",
+                "StackGreenCubeOnYellowCube",
+                "PutEggplantInBasket",
+            ]
         ):
             init_rot_quat = Pose(q=[0, 0, 0, 1]).q
             # env_reset_options={'obj_init_options': {},
@@ -290,6 +340,7 @@ def main():
     has_gripper = any("gripper" in x for x in env.agent.controller.configs)
     is_google_robot = "google_robot" in env.agent.robot.name
     is_widowx = "wx250s" in env.agent.robot.name
+    is_jaco = "ada" in env.agent.robot.name
     is_gripper_delta_target_control = (
         env.agent.controller.controllers["gripper"].config.use_target
         and env.agent.controller.controllers["gripper"].config.use_delta
@@ -306,10 +357,10 @@ def main():
     gripper_action = get_reset_gripper_action()
 
     EE_ACTION = (
-        0.1 if not (is_google_robot or is_widowx) else 0.02
+        0.1 if not (is_google_robot or is_widowx or is_jaco) else 0.02
     )  # google robot and widowx use unnormalized action space
     EE_ROT_ACTION = (
-        1.0 if not (is_google_robot or is_widowx) else 0.1
+        1.0 if not (is_google_robot or is_widowx or is_jaco) else 0.1
     )  # google robot and widowx use unnormalized action space
 
     # print("obj pose", env.obj.pose, "tcp pose", env.tcp.pose)
@@ -442,7 +493,12 @@ def main():
                 )
 
                 images = list(
-                    chain(*[observations_to_images(x) for x in obs["image"].values()])
+                    chain(
+                        *[
+                            observations_to_images(x)
+                            for x in obs["image"].values()
+                        ]
+                    )
                 )
                 render_frame = tile_images(images)
                 opencv_viewer.imshow(render_frame)
@@ -484,7 +540,9 @@ def main():
             gripper_action = 0
 
         # print("obj pose", env.obj.pose, "tcp pose", env.tcp.pose)
-        print("tcp pose wrt robot base", env.agent.robot.pose.inv() * env.tcp.pose)
+        print(
+            "tcp pose wrt robot base", env.agent.robot.pose.inv() * env.tcp.pose
+        )
         print("qpos", env.agent.robot.get_qpos())
         print("reward", reward)
         print("terminated", terminated, "truncated", truncated)

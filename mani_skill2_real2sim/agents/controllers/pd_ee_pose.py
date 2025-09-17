@@ -7,7 +7,10 @@ from gymnasium import spaces
 from scipy.spatial.transform import Rotation
 
 from mani_skill2_real2sim.utils.common import clip_and_scale_action
-from mani_skill2_real2sim.utils.sapien_utils import get_entity_by_name, vectorize_pose
+from mani_skill2_real2sim.utils.sapien_utils import (
+    get_entity_by_name,
+    vectorize_pose,
+)
 
 from ..base_controller import BaseController, ControllerConfig
 from .pd_joint_pos import PDJointPosController
@@ -103,14 +106,18 @@ class PDEEPosController(PDJointPosController):
         if self.config.use_target:
             if self.config.delta_target_from_last_drive_target:
                 # print("set action", "last drive target", self._last_drive_qpos_targets, "last target qpos", self._target_qpos)
-                prev_ee_pose_at_base = self.compute_fk(self._last_drive_qpos_targets)
+                prev_ee_pose_at_base = self.compute_fk(
+                    self._last_drive_qpos_targets
+                )
                 self._start_qpos = self._last_drive_qpos_targets
             else:
                 prev_ee_pose_at_base = self._target_pose
         else:
             prev_ee_pose_at_base = self.ee_pose_at_base
 
-        self._target_pose = self.compute_target_pose(prev_ee_pose_at_base, action)
+        self._target_pose = self.compute_target_pose(
+            prev_ee_pose_at_base, action
+        )
         self._target_qpos = self.compute_ik(self._target_pose)
         if self._target_qpos is None:
             self._target_qpos = self._start_qpos
@@ -223,7 +230,9 @@ class PDEEPoseController(PDEEPosController):
         else:
             assert self.config.frame == "base", self.config.frame
             target_pos, target_rot = action[0:3], action[3:6]
-            target_quat = Rotation.from_rotvec(target_rot).as_quat()[[3, 0, 1, 2]]
+            target_quat = Rotation.from_rotvec(target_rot).as_quat()[
+                [3, 0, 1, 2]
+            ]
             target_pose = sapien.Pose(target_pos, target_quat)
 
         return target_pose

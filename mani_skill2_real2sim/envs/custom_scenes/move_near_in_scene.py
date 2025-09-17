@@ -11,7 +11,7 @@ from mani_skill2_real2sim.utils.common import random_choice
 from mani_skill2_real2sim.utils.registration import register_env
 from mani_skill2_real2sim.utils.sapien_utils import vectorize_pose
 
-from .base_env import CustomSceneEnv, CustomOtherObjectsInSceneEnv
+from .base_env import CustomOtherObjectsInSceneEnv, CustomSceneEnv
 
 
 class MoveNearInSceneEnv(CustomSceneEnv):
@@ -57,6 +57,22 @@ class MoveNearInSceneEnv(CustomSceneEnv):
 
         super().__init__(**kwargs)
 
+        # Add dummy background visual objects
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[5, 5, 0.87], color=[0.05, 0.05, 0.05])
+        dummy_table = builder.build_static()
+        dummy_table.set_pose(sapien.Pose([0, 0, 0.019], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_left = builder.build_static()
+        dummy_left.set_pose(sapien.Pose([0, -0.28, 0], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_right = builder.build_static()
+        dummy_right.set_pose(sapien.Pose([0, 0.76, 0], [0, 0, 0, 1]))
+
     def _setup_prepackaged_env_init_config(self):
         ret = {}
         ret["robot"] = "google_robot_static"
@@ -76,9 +92,7 @@ class MoveNearInSceneEnv(CustomSceneEnv):
 
     def _get_default_scene_config(self):
         scene_config = super()._get_default_scene_config()
-        scene_config.contact_offset = (
-            0.005
-        )  # important to avoid "false-positive" collisions with other objects
+        scene_config.contact_offset = 0.005  # important to avoid "false-positive" collisions with other objects
         return scene_config
 
     def _setup_lighting(self):
@@ -89,7 +103,11 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         if self.original_lighting:
             self._scene.set_ambient_light([0.3, 0.3, 0.3])
             self._scene.add_directional_light(
-                [1, 1, -1], [1, 1, 1], shadow=shadow, scale=5, shadow_map_size=2048
+                [1, 1, -1],
+                [1, 1, 1],
+                shadow=shadow,
+                scale=5,
+                shadow_map_size=2048,
             )
             self._scene.add_directional_light([0, 0, -1], [1, 1, 1])
         elif self.slightly_darker_lighting:
@@ -180,7 +198,8 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         options["robot_init_options"] = {
             "init_xy": [0.35, 0.21],
             "init_rot_quat": (
-                sapien.Pose(q=euler2quat(0, 0, -0.09)) * sapien.Pose(q=[0, 0, 0, 1])
+                sapien.Pose(q=euler2quat(0, 0, -0.09))
+                * sapien.Pose(q=[0, 0, 0, 1])
             ).q,
         }
         new_urdf_version = self._episode_rng.choice(
@@ -223,7 +242,9 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         if model_ids is None:
             model_ids = []
             for _ in range(3):
-                model_ids.append(random_choice(self.model_ids, self._episode_rng))
+                model_ids.append(
+                    random_choice(self.model_ids, self._episode_rng)
+                )
         if not self._list_equal(model_ids, self.episode_model_ids):
             self.episode_model_ids = model_ids
             reconfigure = True
@@ -239,7 +260,9 @@ class MoveNearInSceneEnv(CustomSceneEnv):
                     model_scales.append(1.0)
                 else:
                     model_scales.append(
-                        random_choice(this_available_model_scales, self._episode_rng)
+                        random_choice(
+                            this_available_model_scales, self._episode_rng
+                        )
                     )
         if not self._list_equal(model_scales, self.episode_model_scales):
             self.episode_model_scales = model_scales
@@ -280,8 +303,10 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         obj_init_xys = np.array(obj_init_xys)  # [n_objects, 2]
         assert obj_init_xys.shape == (len(self.episode_objs), 2)
 
-        obj_init_z = self.obj_init_options.get("init_z", self.scene_table_height)
-        obj_init_z = obj_init_z + 0.5 # let object fall onto the table
+        obj_init_z = self.obj_init_options.get(
+            "init_z", self.scene_table_height
+        )
+        obj_init_z = obj_init_z + 0.5  # let object fall onto the table
 
         obj_init_rot_quats = self.obj_init_options.get("init_rot_quats", None)
         if obj_init_rot_quats is not None:
@@ -303,7 +328,7 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         self.agent.robot.set_pose(sapien.Pose([-10, 0, 0]))
 
         self._settle(0.5)
-        
+
         # Unlock motion
         for obj in self.episode_objs:
             obj.lock_motion(0, 0, 0, 0, 0, 0)
@@ -324,12 +349,12 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         self.episode_obj_xyzs_after_settle = []
         for obj in self.episode_objs:
             self.episode_obj_xyzs_after_settle.append(obj.pose.p)
-        self.episode_source_obj_xyz_after_settle = self.episode_obj_xyzs_after_settle[
-            source_obj_id
-        ]
-        self.episode_target_obj_xyz_after_settle = self.episode_obj_xyzs_after_settle[
-            target_obj_id
-        ]
+        self.episode_source_obj_xyz_after_settle = (
+            self.episode_obj_xyzs_after_settle[source_obj_id]
+        )
+        self.episode_target_obj_xyz_after_settle = (
+            self.episode_obj_xyzs_after_settle[target_obj_id]
+        )
         self.episode_source_obj_bbox_world = (
             quat2mat(self.episode_source_obj.pose.q)
             @ self.episode_source_obj_bbox_world
@@ -374,12 +399,15 @@ class MoveNearInSceneEnv(CustomSceneEnv):
             if (obj.name != self.episode_source_obj.name)
             and (obj.name != self.episode_target_obj.name)
         ]
-        other_obj_heights = [self.episode_objs[i].pose.p[2] for i in other_obj_ids]
+        other_obj_heights = [
+            self.episode_objs[i].pose.p[2] for i in other_obj_ids
+        ]
         other_obj_heights_after_settle = [
             self.episode_obj_xyzs_after_settle[i][2] for i in other_obj_ids
         ]
         other_obj_diff_heights = [
-            x - y for (x, y) in zip(other_obj_heights, other_obj_heights_after_settle)
+            x - y
+            for (x, y) in zip(other_obj_heights, other_obj_heights_after_settle)
         ]
         other_obj_keep_height = all(
             [x > -0.02 for x in other_obj_diff_heights]
@@ -413,12 +441,14 @@ class MoveNearInSceneEnv(CustomSceneEnv):
         moved_correct_obj = (source_obj_xy_move_dist > 0.03) and (
             all([x < source_obj_xy_move_dist for x in other_obj_xy_move_dist])
         )
-        moved_wrong_obj = any([x > 0.03 for x in other_obj_xy_move_dist]) and any(
-            [x > source_obj_xy_move_dist for x in other_obj_xy_move_dist]
-        )
+        moved_wrong_obj = any(
+            [x > 0.03 for x in other_obj_xy_move_dist]
+        ) and any([x > source_obj_xy_move_dist for x in other_obj_xy_move_dist])
 
         # Check if the source object is near the target object
-        dist_to_tgt_obj = np.linalg.norm(source_obj_pose.p[:2] - target_obj_pose.p[:2])
+        dist_to_tgt_obj = np.linalg.norm(
+            source_obj_pose.p[:2] - target_obj_pose.p[:2]
+        )
         tgt_obj_bbox_xy_dist = (
             np.linalg.norm(self.episode_target_obj_bbox_world[:2]) / 2
         )  # get half-length of bbox xy diagonol distance in the world frame at timestep=0
@@ -481,7 +511,9 @@ class MoveNearInSceneEnv(CustomSceneEnv):
 
 
 @register_env("MoveNearGoogleInScene-v0", max_episode_steps=80)
-class MoveNearGoogleInSceneEnv(MoveNearInSceneEnv, CustomOtherObjectsInSceneEnv):
+class MoveNearGoogleInSceneEnv(
+    MoveNearInSceneEnv, CustomOtherObjectsInSceneEnv
+):
     def __init__(self, no_distractor=False, **kwargs):
         self.no_distractor = no_distractor
         self._setup_obj_configs()
@@ -539,11 +571,17 @@ class MoveNearGoogleInSceneEnv(MoveNearInSceneEnv, CustomOtherObjectsInSceneEnv)
         episode_id = obj_init_options.get(
             "episode_id", self._episode_rng.randint(_num_episodes)
         )
+        episode_id = episode_id % _num_episodes
         triplet = self.triplets[
-            episode_id // (len(self._source_obj_ids) * len(self._xy_config_per_triplet))
+            episode_id
+            // (len(self._source_obj_ids) * len(self._xy_config_per_triplet))
         ]
-        source_obj_id = self._source_obj_ids[episode_id % len(self._source_obj_ids)]
-        target_obj_id = self._target_obj_ids[episode_id % len(self._target_obj_ids)]
+        source_obj_id = self._source_obj_ids[
+            episode_id % len(self._source_obj_ids)
+        ]
+        target_obj_id = self._target_obj_ids[
+            episode_id % len(self._target_obj_ids)
+        ]
         xy_config_triplet = self._xy_config_per_triplet[
             (
                 episode_id
@@ -580,7 +618,7 @@ class MoveNearGoogleInSceneEnv(MoveNearInSceneEnv, CustomOtherObjectsInSceneEnv)
 
     def _load_model(self):
         self.episode_objs = []
-        for (model_id, model_scale) in zip(
+        for model_id, model_scale in zip(
             self.episode_model_ids, self.episode_model_scales
         ):
             if model_id in self.special_density_dict:
@@ -613,7 +651,11 @@ class MoveNearGoogleBakedTexInSceneEnv(MoveNearGoogleInSceneEnv):
         self.triplets = [
             ("blue_plastic_bottle", "baked_opened_pepsi_can", "orange"),
             ("baked_opened_7up_can", "baked_apple", "baked_sponge"),
-            ("baked_opened_coke_can", "baked_opened_redbull_can", "baked_apple"),
+            (
+                "baked_opened_coke_can",
+                "baked_opened_redbull_can",
+                "baked_apple",
+            ),
             ("baked_sponge", "blue_plastic_bottle", "baked_opened_7up_can"),
             ("orange", "baked_opened_pepsi_can", "baked_opened_redbull_can"),
         ]
@@ -657,7 +699,8 @@ class MoveNearGoogleBakedTexInSceneEnvV1(MoveNearGoogleInSceneEnv):
             self._scene.set_ambient_light([1.0] * 3)
             angle = 90
             self._scene.add_directional_light(
-                [-np.cos(np.deg2rad(angle)), 0, -np.sin(np.deg2rad(angle))], [0.5] * 3
+                [-np.cos(np.deg2rad(angle)), 0, -np.sin(np.deg2rad(angle))],
+                [0.5] * 3,
             )
 
     def _setup_obj_configs(self):
@@ -670,8 +713,16 @@ class MoveNearGoogleBakedTexInSceneEnvV1(MoveNearGoogleInSceneEnv):
                 "baked_opened_redbull_can_v2",
                 "baked_apple_v2",
             ),
-            ("baked_sponge_v2", "blue_plastic_bottle", "baked_opened_7up_can_v2"),
-            ("orange", "baked_opened_pepsi_can_v2", "baked_opened_redbull_can_v2"),
+            (
+                "baked_sponge_v2",
+                "blue_plastic_bottle",
+                "baked_opened_7up_can_v2",
+            ),
+            (
+                "orange",
+                "baked_opened_pepsi_can_v2",
+                "baked_opened_redbull_can_v2",
+            ),
         ]
         self._source_obj_ids, self._target_obj_ids = [], []
         for i in range(3):

@@ -15,8 +15,14 @@ from mani_skill2_real2sim.sensors.camera import (
     parse_camera_cfgs,
     update_camera_cfgs_from_dict,
 )
-from mani_skill2_real2sim.sensors.depth_camera import StereoDepthCamera, StereoDepthCameraConfig
-from mani_skill2_real2sim.utils.common import convert_observation_to_space, flatten_state_dict
+from mani_skill2_real2sim.sensors.depth_camera import (
+    StereoDepthCamera,
+    StereoDepthCameraConfig,
+)
+from mani_skill2_real2sim.utils.common import (
+    convert_observation_to_space,
+    flatten_state_dict,
+)
 from mani_skill2_real2sim.utils.sapien_utils import (
     get_actor_state,
     get_articulation_state,
@@ -28,7 +34,10 @@ from mani_skill2_real2sim.utils.trimesh_utils import (
     get_articulation_meshes,
     merge_meshes,
 )
-from mani_skill2_real2sim.utils.visualization.misc import observations_to_images, tile_images
+from mani_skill2_real2sim.utils.visualization.misc import (
+    observations_to_images,
+    tile_images,
+)
 
 
 class BaseEnv(gym.Env):
@@ -106,7 +115,9 @@ class BaseEnv(gym.Env):
         if self._renderer_type == "sapien":
             self._renderer = sapien.SapienRenderer(**renderer_kwargs)
             if shader_dir == "ibl":
-                _render_config = dict(camera_shader_dir="ibl", viewer_shader_dir="ibl")
+                _render_config = dict(
+                    camera_shader_dir="ibl", viewer_shader_dir="ibl"
+                )
             elif shader_dir == "rt":
                 _render_config = dict(
                     camera_shader_dir="rt",
@@ -124,7 +135,9 @@ class BaseEnv(gym.Env):
             _render_config.update(render_config)
             for k, v in _render_config.items():
                 setattr(sapien.render_config, k, v)
-            self._renderer.set_log_level(os.getenv("MS2_RENDERER_LOG_LEVEL", "warn"))
+            self._renderer.set_log_level(
+                os.getenv("MS2_RENDERER_LOG_LEVEL", "warn")
+            )
         elif self._renderer_type == "client":
             self._renderer = sapien.RenderClient(**renderer_kwargs)
             # TODO(jigu): add `set_log_level` for RenderClient?
@@ -146,21 +159,27 @@ class BaseEnv(gym.Env):
         if obs_mode is None:
             obs_mode = self.SUPPORTED_OBS_MODES[0]
         if obs_mode not in self.SUPPORTED_OBS_MODES:
-            raise NotImplementedError("Unsupported obs mode: {}".format(obs_mode))
+            raise NotImplementedError(
+                "Unsupported obs mode: {}".format(obs_mode)
+            )
         self._obs_mode = obs_mode
 
         # Reward mode
         if reward_mode is None:
             reward_mode = self.SUPPORTED_REWARD_MODES[0]
         if reward_mode not in self.SUPPORTED_REWARD_MODES:
-            raise NotImplementedError("Unsupported reward mode: {}".format(reward_mode))
+            raise NotImplementedError(
+                "Unsupported reward mode: {}".format(reward_mode)
+            )
         self._reward_mode = reward_mode
 
         # Control mode
         self._control_mode = control_mode
         # TODO(jigu): Support dict action space
         if control_mode == "*":
-            raise NotImplementedError("Multiple controllers are not supported yet.")
+            raise NotImplementedError(
+                "Multiple controllers are not supported yet."
+            )
 
         # Render mode
         self.render_mode = render_mode
@@ -174,7 +193,9 @@ class BaseEnv(gym.Env):
         if camera_cfgs is not None:
             update_camera_cfgs_from_dict(self._camera_cfgs, camera_cfgs)
         if render_camera_cfgs is not None:
-            update_camera_cfgs_from_dict(self._render_camera_cfgs, render_camera_cfgs)
+            update_camera_cfgs_from_dict(
+                self._render_camera_cfgs, render_camera_cfgs
+            )
 
         # Lighting
         self.enable_shadow = enable_shadow
@@ -213,7 +234,9 @@ class BaseEnv(gym.Env):
         return []
 
     def _configure_render_cameras(self):
-        self._render_camera_cfgs = parse_camera_cfgs(self._register_render_cameras())
+        self._render_camera_cfgs = parse_camera_cfgs(
+            self._register_render_cameras()
+        )
 
     def _register_render_cameras(
         self,
@@ -268,7 +291,9 @@ class BaseEnv(gym.Env):
 
     def _get_obs_state_dict(self):
         """Get (GT) state-based observations."""
-        return OrderedDict(agent=self._get_obs_agent(), extra=self._get_obs_extra())
+        return OrderedDict(
+            agent=self._get_obs_agent(), extra=self._get_obs_extra()
+        )
 
     def _get_obs_agent(self):
         """Get observations from the agent's sensors, e.g., proprioceptive sensors."""
@@ -405,7 +430,10 @@ class BaseEnv(gym.Env):
             else:
                 cam_cls = Camera
             self._cameras[uid] = cam_cls(
-                camera_cfg, self._scene, self._renderer_type, articulation=articulation
+                camera_cfg,
+                self._scene,
+                self._renderer_type,
+                articulation=articulation,
             )
 
         # Cameras for rendering only
@@ -429,6 +457,22 @@ class BaseEnv(gym.Env):
         self._scene.add_directional_light([0, 0, -1], [1, 1, 1])
 
     def _load_background(self):
+        # Add dummy background visual objects
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[5, 5, 0.87], color=[0.05, 0.05, 0.05])
+        dummy_table = builder.build_static()
+        dummy_table.set_pose(sapien.Pose([0, 0, 0.019], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_left = builder.build_static()
+        dummy_left.set_pose(sapien.Pose([0, -0.28, 0], [0, 0, 0, 1]))
+
+        builder = self._scene.create_actor_builder()
+        builder.add_box_visual(half_size=[2, 0.01, 2], color=[0.48, 0.48, 0.48])
+        dummy_right = builder.build_static()
+        dummy_right.set_pose(sapien.Pose([0, 0.76, 0], [0, 0, 0, 1]))
+
         if self.bg_name is None:
             return
 
@@ -443,7 +487,9 @@ class BaseEnv(gym.Env):
             self._scene.set_ambient_light([0.1, 0.1, 0.1])
             self._scene.add_point_light([-0.349, 0, 1.4], [1.0, 0.9, 0.9])
         else:
-            raise NotImplementedError("Unsupported background: {}".format(self.bg_name))
+            raise NotImplementedError(
+                "Unsupported background: {}".format(self.bg_name)
+            )
 
         if not path.exists():
             raise FileNotFoundError(
@@ -492,14 +538,14 @@ class BaseEnv(gym.Env):
         if seed is None:
             if self._main_seed is not None:
                 return
-            seed = np.random.RandomState().randint(2 ** 32)
+            seed = np.random.RandomState().randint(2**32)
         self._main_seed = seed
         self._main_rng = np.random.RandomState(self._main_seed)
 
     def set_episode_rng(self, seed):
         """Set the random generator for current episode."""
         if seed is None:
-            self._episode_seed = self._main_rng.randint(2 ** 32)
+            self._episode_seed = self._main_rng.randint(2**32)
         else:
             self._episode_seed = seed
         self._episode_rng = np.random.RandomState(self._episode_seed)
@@ -601,9 +647,7 @@ class BaseEnv(gym.Env):
         scene_config.contact_offset = 0.02
         scene_config.enable_pcm = False
         scene_config.solver_iterations = 25
-        scene_config.enable_tgs = (
-            True
-        )  # **This is crucial for preventing mesh penetration for google robot**
+        scene_config.enable_tgs = True  # **This is crucial for preventing mesh penetration for google robot**
         # NOTE(fanbo): solver_velocity_iterations=0 is undefined in PhysX
         scene_config.solver_velocity_iterations = 1
         if self._renderer_type == "client":
@@ -750,7 +794,9 @@ class BaseEnv(gym.Env):
         elif self.render_mode == "cameras":
             return self.render_cameras()
         else:
-            raise NotImplementedError(f"Unsupported render mode {self.render_mode}.")
+            raise NotImplementedError(
+                f"Unsupported render mode {self.render_mode}."
+            )
 
     # ---------------------------------------------------------------------------- #
     # Advanced
@@ -762,7 +808,9 @@ class BaseEnv(gym.Env):
         if self.agent is not None:
             articulations.pop(articulations.index(self.agent.robot))
         for articulation in articulations:
-            articulation_mesh = merge_meshes(get_articulation_meshes(articulation))
+            articulation_mesh = merge_meshes(
+                get_articulation_meshes(articulation)
+            )
             if articulation_mesh:
                 meshes.append(articulation_mesh)
 

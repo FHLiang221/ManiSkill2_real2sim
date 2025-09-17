@@ -6,7 +6,10 @@ import numpy as np
 import sapien.core as sapien
 from gymnasium import spaces
 
-from mani_skill2_real2sim.utils.common import clip_and_scale_action, normalize_action_space
+from mani_skill2_real2sim.utils.common import (
+    clip_and_scale_action,
+    normalize_action_space,
+)
 
 from .utils import (
     flatten_action_spaces,
@@ -39,7 +42,9 @@ class BaseController:
         # For action interpolation
         if sim_freq is None:  # infer from scene
             # TODO(jigu): update sapien interface to avoid this workaround
-            sim_timestep = self.articulation.get_builder().get_scene().get_timestep()
+            sim_timestep = (
+                self.articulation.get_builder().get_scene().get_timestep()
+            )
             sim_freq = round(1.0 / sim_timestep)
         # Number of simulation steps per control step
         self._sim_steps = sim_freq // control_freq
@@ -62,7 +67,9 @@ class BaseController:
             )
         except Exception as err:
             print("Encounter error when parsing joint names.")
-            active_joint_names = [x.name for x in self.articulation.get_active_joints()]
+            active_joint_names = [
+                x.name for x in self.articulation.get_active_joints()
+            ]
             print("Joint names of the articulation", active_joint_names)
             print("Joint names of the controller", joint_names)
             raise err
@@ -136,7 +143,9 @@ class BaseController:
     # -------------------------------------------------------------------------- #
     # Planning utils
     # -------------------------------------------------------------------------- #
-    def plan_joint_path(self, start_qpos, target_qpos, vlim, alim, jerklim, init_v=0.0):
+    def plan_joint_path(
+        self, start_qpos, target_qpos, vlim, alim, jerklim, init_v=0.0
+    ):
         planner_result = parameterize_path(
             start_qpos, target_qpos, init_v, vlim, alim, jerklim
         )
@@ -211,7 +220,9 @@ class DictController(BaseController):
         ):
             print("active_joints:", [x.name for x in active_joints])
             print("controlled_joints:", [x.name for x in self.joints])
-            raise AssertionError("{} is not fully actuated".format(self.articulation))
+            raise AssertionError(
+                "{} is not fully actuated".format(self.articulation)
+            )
 
     def set_drive_property(self):
         raise RuntimeError(
