@@ -311,7 +311,7 @@ class CloseDrawerInSceneEnv(OpenDrawerInSceneEnv):
         qpos = self.art_obj.get_qpos()[self.joint_idx]
         self.episode_stats["qpos"] = "{:.3f}".format(qpos)
         return dict(
-            success=qpos <= 0.01, qpos=qpos, episode_stats=self.episode_stats
+            success=qpos <= 0.05, qpos=qpos, episode_stats=self.episode_stats
         )
 
     def get_language_instruction(self):
