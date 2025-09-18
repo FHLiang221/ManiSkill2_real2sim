@@ -706,23 +706,24 @@ class MoveNearGoogleBakedTexInSceneEnvV1(MoveNearGoogleInSceneEnv):
     def _setup_obj_configs(self):
         # Note: the cans are "opened" here to match the real evaluation; we'll remove "open" when getting language instruction
         self.triplets = [
-            ("blue_plastic_bottle", "baked_opened_pepsi_can_v2", "orange"),
-            ("baked_opened_7up_can_v2", "baked_apple_v2", "baked_sponge_v2"),
-            (
-                "baked_opened_coke_can_v2",
-                "baked_opened_redbull_can_v2",
-                "baked_apple_v2",
-            ),
-            (
-                "baked_sponge_v2",
-                "blue_plastic_bottle",
-                "baked_opened_7up_can_v2",
-            ),
-            (
-                "orange",
-                "baked_opened_pepsi_can_v2",
-                "baked_opened_redbull_can_v2",
-            ),
+            # ("blue_plastic_bottle", "baked_opened_pepsi_can_v2", "orange"),
+            # ("baked_opened_7up_can_v2", "baked_apple_v2", "baked_sponge_v2"),
+            # (
+            #     "baked_opened_coke_can_v2",
+            #     "baked_opened_redbull_can_v2",
+            #     "baked_apple_v2",
+            # ),
+            # (
+            #     "baked_sponge_v2",
+            #     "blue_plastic_bottle",
+            #     "baked_opened_7up_can_v2",
+            # ),
+            # (
+            #     "orange",
+            #     "baked_opened_pepsi_can_v2",
+            #     "baked_opened_redbull_can_v2",
+            # ),
+            ("baked_apple_v2", "baked_sponge_v2", "baked_opened_coke_can_v2")
         ]
         self._source_obj_ids, self._target_obj_ids = [], []
         for i in range(3):
