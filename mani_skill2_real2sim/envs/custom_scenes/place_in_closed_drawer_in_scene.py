@@ -210,6 +210,7 @@ class PlaceObjectInClosedDrawerInSceneEnv(OpenDrawerInSceneEnv):
 
     def _initialize_episode_stats(self):
         self.cur_subtask_id = 0 # 0: open drawer, 1: place object into drawer
+        self.consecutive_contact_steps = 0  # Track consecutive contact timesteps
         self.episode_stats = OrderedDict(
             qpos=0.0, is_drawer_open=False, has_contact=0
         )
@@ -232,7 +233,16 @@ class PlaceObjectInClosedDrawerInSceneEnv(OpenDrawerInSceneEnv):
         has_contact = np.linalg.norm(total_impulse) > 1e-6
         self.episode_stats["has_contact"] += has_contact
 
-        success = (self.cur_subtask_id == 1) and (qpos >= 0.05) and (self.episode_stats["has_contact"] >= 1)
+        # Track consecutive contact steps for sustained placement
+        if has_contact:
+            self.consecutive_contact_steps += 1
+        else:
+            self.consecutive_contact_steps = 0
+
+        # Require sustained contact for ~1 second (assuming 3-5 Hz control freq, use 3 steps)
+        sustained_contact = self.consecutive_contact_steps >= 3
+
+        success = (self.cur_subtask_id == 1) and (qpos >= 0.05) and sustained_contact
 
         return dict(success=success, episode_stats=self.episode_stats)
 
