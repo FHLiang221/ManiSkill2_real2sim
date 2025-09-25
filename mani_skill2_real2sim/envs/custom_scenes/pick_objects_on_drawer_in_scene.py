@@ -2,44 +2,33 @@ from collections import OrderedDict
 from typing import List, Optional
 
 import numpy as np
+import cv2
 import sapien.core as sapien
-from transforms3d.euler import euler2quat
-from transforms3d.quaternions import axangle2quat, qmult
-
 from mani_skill2_real2sim import ASSET_DIR
-from mani_skill2_real2sim.utils.common import random_choice
 from mani_skill2_real2sim.utils.registration import register_env
+from mani_skill2_real2sim.utils.sapien_utils import get_entity_by_name
+from transforms3d.euler import euler2quat
+from mani_skill2_real2sim.utils.common import random_choice
+from transforms3d.quaternions import axangle2quat, qmult
 from mani_skill2_real2sim.utils.sapien_utils import vectorize_pose
 
-from .base_env import CustomSceneEnv, CustomOtherObjectsInSceneEnv
+from .base_env import CustomOtherObjectsInSceneEnv, CustomSceneEnv
 from .open_drawer_in_scene import OpenDrawerInSceneEnv
 
 
 class PickObjectOnDrawerInSceneEnv(OpenDrawerInSceneEnv):
-    """Base class for picking objects that are placed on top of a closed drawer with distractor objects"""
+    """Pick an object placed on top of a closed drawer"""
 
     def __init__(
         self,
-        target_object_id: str = "opened_coke_can",
-        distractor_object_ids: List[str] = None,
-        require_lifting_obj_for_success: bool = True,
-        success_from_episode_stats: bool = True,
         **kwargs,
     ):
-        self.target_object_id = target_object_id
-        self.distractor_object_ids = distractor_object_ids or ["sponge", "apple"]
-
-        self.target_obj = None
-        self.distractor_objs = []
-
-        self.require_lifting_obj_for_success = require_lifting_obj_for_success
-        self.success_from_episode_stats = success_from_episode_stats
-        self.consecutive_grasp = 0
-        self.lifted_obj = False
-        self.obj_height_after_settle = None
-
-        # Object initialization options
+        self.model_id = None
+        self.model_scale = None
+        self.model_bbox_size = None
+        self.obj = None
         self.obj_init_options = {}
+        self.obj_height_after_settle = None
 
         super().__init__(**kwargs)
 
@@ -48,26 +37,44 @@ class PickObjectOnDrawerInSceneEnv(OpenDrawerInSceneEnv):
         scene_config.contact_offset = 0.005  # avoid "false-positive" collisions
         return scene_config
 
-    def _load_actors(self):
-        # Load the drawer/cabinet scene
-        self._load_arena_helper(add_collision=False)
-        # Load target and distractor objects
-        self._load_objects()
+    def _set_model(self, model_id, model_scale):
+        """Set the model id and scale. If not provided, choose one randomly from self.model_ids."""
+        reconfigure = False
 
-        # Set damping for all objects
-        self.target_obj.set_damping(0.1, 0.1)
-        for obj in self.distractor_objs:
-            obj.set_damping(0.1, 0.1)
+        if model_id is None:
+            model_id = random_choice(self.model_ids, self._episode_rng)
+        if model_id != self.model_id:
+            self.model_id = model_id
+            reconfigure = True
 
-    def _load_objects(self):
-        """Load target object and distractor objects"""
-        # Load target object
-        target_density = self.model_db[self.target_object_id].get("density", 1000)
-        self.target_obj = self._build_actor_helper(
-            self.target_object_id,
+        if model_scale is None:
+            model_scales = self.model_db[self.model_id].get("scales")
+            if model_scales is None:
+                model_scale = 1.0
+            else:
+                model_scale = random_choice(model_scales, self._episode_rng)
+        if model_scale != self.model_scale:
+            self.model_scale = model_scale
+            reconfigure = True
+
+        model_info = self.model_db[self.model_id]
+        if "bbox" in model_info:
+            bbox = model_info["bbox"]
+            bbox_size = np.array(bbox["max"]) - np.array(bbox["min"])
+            self.model_bbox_size = bbox_size * self.model_scale
+        else:
+            self.model_bbox_size = None
+
+        return reconfigure
+
+    def _load_model(self):
+        density = self.model_db[self.model_id].get("density", 1000)
+
+        self.obj = self._build_actor_helper(
+            self.model_id,
             self._scene,
-            scale=1.0,
-            density=target_density,
+            scale=self.model_scale,
+            density=density,
             physical_material=self._scene.create_physical_material(
                 static_friction=self.obj_static_friction,
                 dynamic_friction=self.obj_dynamic_friction,
@@ -75,142 +82,133 @@ class PickObjectOnDrawerInSceneEnv(OpenDrawerInSceneEnv):
             ),
             root_dir=self.asset_root,
         )
-        self.target_obj.name = self.target_object_id
+        self.obj.name = self.model_id
 
-        # Load distractor objects
-        for distractor_id in self.distractor_object_ids:
-            distractor_density = self.model_db[distractor_id].get("density", 1000)
-            distractor_obj = self._build_actor_helper(
-                distractor_id,
-                self._scene,
-                scale=1.0,
-                density=distractor_density,
-                physical_material=self._scene.create_physical_material(
-                    static_friction=self.obj_static_friction,
-                    dynamic_friction=self.obj_dynamic_friction,
-                    restitution=0.0,
-                ),
-                root_dir=self.asset_root,
-            )
-            distractor_obj.name = distractor_id
-            self.distractor_objs.append(distractor_obj)
+    def _load_actors(self):
+        super()._load_actors()
+        self._load_model()
+        self.obj.set_damping(0.1, 0.1)
 
     def _initialize_actors(self):
-        # Initialize the drawer (keep it closed)
+        # Keep the drawer closed (no opening needed for pick task)
         self.art_obj.set_qpos([0.0] * self.art_obj.dof)
 
-        # Get drawer position to place objects on top
-        drawer_link = self.drawer_obj
-        drawer_pos = drawer_link.pose.p
-        drawer_top_z = drawer_pos[2] + 0.4  # Place objects on top of closed drawer
+        # The object will fall from a certain initial height
+        obj_init_xy = self.obj_init_options.get("init_xy", None)
+        if obj_init_xy is None:
+            obj_init_xy = self._episode_rng.uniform([-0.10, -0.00], [-0.05, 0.1], [2])
+        obj_init_z = self.obj_init_options.get("init_z", self.scene_table_height)
+        obj_init_z = obj_init_z + 0.5  # let object fall onto the table
+        obj_init_rot_quat = self.obj_init_options.get("init_rot_quat", [1, 0, 0, 0])
+        p = np.hstack([obj_init_xy, obj_init_z])
+        q = obj_init_rot_quat
 
-        # Place target object on drawer
-        target_xy = self.obj_init_options.get("target_init_xy", None)
-        if target_xy is None:
-            target_xy = drawer_pos[:2] + self._episode_rng.uniform([-0.05, -0.05], [0.05, 0.05])
-
-        target_init_z = drawer_top_z + 0.5  # Let object fall onto drawer top
-        target_p = np.array([target_xy[0], target_xy[1], target_init_z])
-        target_q = self.obj_init_options.get("target_init_rot_quat", [1, 0, 0, 0])
-
-        # Apply random rotation if specified
+        # Rotate along z-axis
         if self.obj_init_options.get("init_rand_rot_z", False):
             ori = self._episode_rng.uniform(0, 2 * np.pi)
-            target_q = qmult(euler2quat(0, 0, ori), target_q)
+            q = qmult(euler2quat(0, 0, ori), q)
 
-        self.target_obj.set_pose(sapien.Pose(target_p, target_q))
+        # Rotate along a random axis by a small angle
+        if (
+            init_rand_axis_rot_range := self.obj_init_options.get(
+                "init_rand_axis_rot_range", 0.0
+            )
+        ) > 0:
+            axis = self._episode_rng.uniform(-1, 1, 3)
+            axis = axis / max(np.linalg.norm(axis), 1e-6)
+            ori = self._episode_rng.uniform(0, init_rand_axis_rot_range)
+            q = qmult(q, axangle2quat(axis, ori, True))
+        self.obj.set_pose(sapien.Pose(p, q))
 
-        # Place distractor objects on drawer top
-        distractor_positions = self._get_distractor_positions(drawer_pos[:2], drawer_top_z)
-        for i, (distractor_obj, distractor_pos) in enumerate(zip(self.distractor_objs, distractor_positions)):
-            distractor_p = np.array([distractor_pos[0], distractor_pos[1], target_init_z])
-            distractor_q = [1, 0, 0, 0]
-
-            # Add some random rotation for variety
-            if self.obj_init_options.get("init_rand_rot_z", True):
-                ori = self._episode_rng.uniform(0, 2 * np.pi)
-                distractor_q = qmult(euler2quat(0, 0, ori), distractor_q)
-
-            distractor_obj.set_pose(sapien.Pose(distractor_p, distractor_q))
-
-        # Move robot away initially
+        # Move the robot far away to avoid collision
+        # The robot should be initialized later in _initialize_agent (in base_env.py)
         self.agent.robot.set_pose(sapien.Pose([-10, 0, 0]))
 
-        # Lock objects to prevent rolling while settling
-        self.target_obj.lock_motion(0, 0, 0, 1, 1, 0)
-        for obj in self.distractor_objs:
-            obj.lock_motion(0, 0, 0, 1, 1, 0)
-
+        # Lock rotation around x and y to let the target object fall onto the table
+        self.obj.lock_motion(0, 0, 0, 1, 1, 0)
         self._settle(0.5)
 
-        # Unlock objects
-        self.target_obj.lock_motion(0, 0, 0, 0, 0, 0)
-        self.target_obj.set_pose(self.target_obj.pose)
-        self.target_obj.set_velocity(np.zeros(3))
-        self.target_obj.set_angular_velocity(np.zeros(3))
-
-        for obj in self.distractor_objs:
-            obj.lock_motion(0, 0, 0, 0, 0, 0)
-            obj.set_pose(obj.pose)
-            obj.set_velocity(np.zeros(3))
-            obj.set_angular_velocity(np.zeros(3))
-
+        # Unlock motion
+        self.obj.lock_motion(0, 0, 0, 0, 0, 0)
+        # NOTE(jigu): Explicit set pose to ensure the actor does not sleep
+        self.obj.set_pose(self.obj.pose)
+        self.obj.set_velocity(np.zeros(3))
+        self.obj.set_angular_velocity(np.zeros(3))
         self._settle(0.5)
 
-        # Record object height after settling
-        self.obj_height_after_settle = self.target_obj.pose.p[2]
-
-        # Additional settling if objects are still moving
-        total_vel = np.linalg.norm(self.target_obj.velocity)
-        for obj in self.distractor_objs:
-            total_vel += np.linalg.norm(obj.velocity)
-        if total_vel > 1e-3:
+        # Some objects need longer time to settle
+        lin_vel = np.linalg.norm(self.obj.velocity)
+        ang_vel = np.linalg.norm(self.obj.angular_velocity)
+        if lin_vel > 1e-3 or ang_vel > 1e-2:
             self._settle(1.5)
 
-    def _get_distractor_positions(self, drawer_center_xy, drawer_top_z):
-        """Generate positions for distractor objects around the target"""
-        positions = []
-        for i in range(len(self.distractor_object_ids)):
-            # Place distractors in a circle around the drawer center
-            angle = 2 * np.pi * i / len(self.distractor_object_ids)
-            radius = 0.08 + self._episode_rng.uniform(0, 0.04)  # Small radius on drawer top
-            x = drawer_center_xy[0] + radius * np.cos(angle)
-            y = drawer_center_xy[1] + radius * np.sin(angle)
-            positions.append([x, y])
-        return positions
+        # Record the object height after it settles
+        self.obj_height_after_settle = self.obj.pose.p[2]
 
     def reset(self, seed=None, options=None):
-        # Remove any existing distractor objects from previous episodes
-        for obj in self.distractor_objs:
-            if obj in self._scene.get_all_actors():
-                self._scene.remove_actor(obj)
-        self.distractor_objs = []
-
         if options is None:
             options = dict()
         options = options.copy()
+        self.set_episode_rng(seed)
 
+        # Set objects
         self.obj_init_options = options.get("obj_init_options", {})
+        model_scale = options.get("model_scale", None)
+        model_id = options.get("model_id", None)
+        reconfigure = options.get("reconfigure", False)
+        _reconfigure = self._set_model(model_id, model_scale)
+        reconfigure = _reconfigure or reconfigure
+        options["reconfigure"] = reconfigure
 
-        # Initialize episode stats
-        self.consecutive_grasp = 0
-        self.lifted_obj = False
-        self.obj_height_after_settle = None
-        self._initialize_episode_stats()
+        obs, info = super().reset(seed=self._episode_seed, options=options)
+        return obs, info
 
-        return super().reset(seed=seed, options=options)
+    def _additional_prepackaged_config_reset(self, options):
+        # Use prepackaged evaluation configs under visual matching setup
+        overlay_ids = ["a0", "b0", "c0"]
+        rgb_overlay_paths = [
+            str(ASSET_DIR / f"real_inpainting/open_drawer_{i}.png") for i in overlay_ids
+        ]
+        robot_init_xs = [0.644, 0.652, 0.665]
+        robot_init_ys = [-0.179, 0.009, 0.224]
+        robot_init_rotzs = [-0.03, 0, 0]
+        idx_chosen = self._episode_rng.choice(len(overlay_ids))
+
+        options["robot_init_options"] = {
+            "init_xy": [robot_init_xs[idx_chosen], robot_init_ys[idx_chosen]],
+            "init_rot_quat": (
+                sapien.Pose(q=euler2quat(0, 0, robot_init_rotzs[idx_chosen]))
+                * sapien.Pose(q=[0, 0, 0, 1])
+            ).q,
+        }
+        self.rgb_overlay_img = (
+            cv2.cvtColor(cv2.imread(rgb_overlay_paths[idx_chosen]), cv2.COLOR_BGR2RGB)
+            / 255
+        )
+        new_urdf_version = self._episode_rng.choice(
+            [
+                "",
+                "recolor_tabletop_visual_matching_1",
+                "recolor_tabletop_visual_matching_2",
+                "recolor_cabinet_visual_matching_1",
+            ]
+        )
+        if new_urdf_version != self.urdf_version:
+            self.urdf_version = new_urdf_version
+            self._configure_agent()
+            return True
+        return False
 
     def _initialize_episode_stats(self):
         self.episode_stats = OrderedDict(
-            n_lift_significant=0,
-            consec_grasp=False,
-            grasped=False,
+            is_grasped=False,
+            lifted_10cm=False
         )
 
     @property
-    def target_obj_pose(self):
-        """Get the center of mass (COM) pose of target object."""
-        return self.target_obj.pose.transform(self.target_obj.cmass_local_pose)
+    def obj_pose(self):
+        """Get the center of mass (COM) pose of the object."""
+        return self.obj.pose.transform(self.obj.cmass_local_pose)
 
     def _get_obs_extra(self) -> OrderedDict:
         obs = OrderedDict(
@@ -218,108 +216,134 @@ class PickObjectOnDrawerInSceneEnv(OpenDrawerInSceneEnv):
         )
         if self._obs_mode in ["state", "state_dict"]:
             obs.update(
-                target_obj_pose=vectorize_pose(self.target_obj_pose),
-                tcp_to_target_obj_pos=self.target_obj_pose.p - self.tcp.pose.p,
+                obj_pose=vectorize_pose(self.obj_pose),
+                tcp_to_obj_pos=self.obj_pose.p - self.tcp.pose.p,
             )
         return obs
 
     def evaluate(self, **kwargs):
-        # Check if target object is grasped
-        is_grasped = self.agent.check_grasp(self.target_obj, max_angle=80)
-        if is_grasped:
-            self.consecutive_grasp += 1
-        else:
-            self.consecutive_grasp = 0
-            self.lifted_obj = False
+        # Check if object is grasped
+        is_grasped = self.agent.check_grasp(self.obj, max_angle=80)
+        self.episode_stats["is_grasped"] = self.episode_stats["is_grasped"] or is_grasped
 
-        # Check if object is lifted (not in contact with non-robot surfaces)
-        contacts = self._scene.get_contacts()
-        flag = True
-        robot_link_names = [x.name for x in self.agent.robot.get_links()]
+        # Check if object is lifted 10cm above its settled position
+        current_height = self.obj.pose.p[2]
+        height_diff = current_height - self.obj_height_after_settle
+        lifted_10cm = height_diff >= 0.10  # 10cm = 0.10m
+        self.episode_stats["lifted_10cm"] = self.episode_stats["lifted_10cm"] or lifted_10cm
 
-        for contact in contacts:
-            actor_0, actor_1 = contact.actor0, contact.actor1
-            other_obj_contact_actor_name = None
-            if actor_0.name == self.target_obj.name:
-                other_obj_contact_actor_name = actor_1.name
-            elif actor_1.name == self.target_obj.name:
-                other_obj_contact_actor_name = actor_0.name
-
-            if other_obj_contact_actor_name is not None:
-                contact_impulse = np.sum([point.impulse for point in contact.points], axis=0)
-                if (other_obj_contact_actor_name not in robot_link_names) and (
-                    np.linalg.norm(contact_impulse) > 1e-6
-                ):
-                    flag = False
-                    break
-
-        consecutive_grasp = self.consecutive_grasp >= 5
-        diff_obj_height = self.target_obj.pose.p[2] - self.obj_height_after_settle
-        self.lifted_obj = self.lifted_obj or (flag and (diff_obj_height > 0.10))
-        lifted_object_significantly = self.lifted_obj and (diff_obj_height > 0.10)
-
-        if self.require_lifting_obj_for_success:
-            success = self.lifted_obj
-        else:
-            success = consecutive_grasp
-
-        # Update episode stats
-        self.episode_stats["n_lift_significant"] += int(lifted_object_significantly)
-        self.episode_stats["consec_grasp"] = (
-            self.episode_stats["consec_grasp"] or consecutive_grasp
-        )
-        self.episode_stats["grasped"] = self.episode_stats["grasped"] or is_grasped
-
-        if self.success_from_episode_stats:
-            success = success or (self.episode_stats["n_lift_significant"] >= 5)
+        # Success is when object is lifted 10cm
+        success = lifted_10cm
 
         return dict(
-            is_grasped=is_grasped,
-            consecutive_grasp=consecutive_grasp,
-            lifted_object=self.lifted_obj,
-            lifted_object_significantly=lifted_object_significantly,
             success=success,
-            episode_stats=self.episode_stats,
+            is_grasped=is_grasped,
+            lifted_10cm=lifted_10cm,
+            height_diff=height_diff,
+            episode_stats=self.episode_stats
         )
 
     def get_language_instruction(self, **kwargs):
-        obj_name = self._get_instruction_obj_name(self.target_object_id)
-        return f"pick {obj_name}"
+        model_name = self._get_instruction_obj_name(self.model_id)
+        return f"pick {model_name}"
 
 
-# Specific implementations for different target objects
+@register_env("PickObjectOnClosedDrawerInScene-v0", max_episode_steps=200)
+class PickObjectOnClosedDrawerInSceneEnv(
+    PickObjectOnDrawerInSceneEnv, CustomOtherObjectsInSceneEnv
+):
+    DEFAULT_MODEL_JSON = "info_pick_custom_baked_tex_v1.json"
+    drawer_ids = ["top", "middle", "bottom"]
 
-@register_env("PickCokeCanOnClosedDrawerInScene-v0", max_episode_steps=10000)
-class PickCokeCanOnClosedDrawerInSceneEnv(PickObjectOnDrawerInSceneEnv, CustomOtherObjectsInSceneEnv):
+
+# Specific implementations for different drawers
+@register_env("PickObjectOnClosedTopDrawerInScene-v0", max_episode_steps=200)
+class PickObjectOnClosedTopDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
+    drawer_ids = ["top"]
+
+
+@register_env("PickObjectOnClosedMiddleDrawerInScene-v0", max_episode_steps=200)
+class PickObjectOnClosedMiddleDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
+    drawer_ids = ["middle"]
+
+
+@register_env("PickObjectOnClosedBottomDrawerInScene-v0", max_episode_steps=200)
+class PickObjectOnClosedBottomDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
+    drawer_ids = ["bottom"]
+
+
+# Specific object implementations
+@register_env("PickCokeCanOnClosedDrawerInScene-v0", max_episode_steps=200)
+class PickCokeCanOnClosedDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
     drawer_ids = ["top", "middle", "bottom"]
 
     def __init__(self, **kwargs):
-        super().__init__(
-            target_object_id="opened_coke_can",
-            distractor_object_ids=["sponge", "apple"],
-            **kwargs
-        )
+        super().__init__(**kwargs)
+        self.model_ids = ["opened_coke_can"]
+
+    def _initialize_actors(self):
+        # Keep the drawer closed (no opening needed for pick task)
+        self.art_obj.set_qpos([0.0] * self.art_obj.dof)
+
+        # The object will fall from a certain initial height
+        obj_init_xy = self.obj_init_options.get("init_xy", None)
+        if obj_init_xy is None:
+            obj_init_xy = self._episode_rng.uniform([-0.10, -0.00], [-0.05, 0.1], [2])
+        obj_init_z = self.obj_init_options.get("init_z", self.scene_table_height)
+        obj_init_z = obj_init_z + 0.5  # let object fall onto the table
+
+        # Set coke can to standing (upright) orientation
+        obj_init_rot_quat = self.obj_init_options.get("init_rot_quat", euler2quat(np.pi / 2, 0, 0))
+        p = np.hstack([obj_init_xy, obj_init_z])
+        q = obj_init_rot_quat
+
+        # Apply random Z rotation only (keep upright but allow rotation around vertical axis)
+        if self.obj_init_options.get("init_rand_rot_z", True):
+            ori = self._episode_rng.uniform(0, 2 * np.pi)
+            q = qmult(euler2quat(0, 0, ori), q)
+
+        # Skip random axis rotation to keep can upright
+        self.obj.set_pose(sapien.Pose(p, q))
+
+        # Move the robot far away to avoid collision
+        # The robot should be initialized later in _initialize_agent (in base_env.py)
+        self.agent.robot.set_pose(sapien.Pose([-10, 0, 0]))
+
+        # Lock rotation around x and y to let the target object fall onto the table
+        self.obj.lock_motion(0, 0, 0, 1, 1, 0)
+        self._settle(0.5)
+
+        # Unlock motion
+        self.obj.lock_motion(0, 0, 0, 0, 0, 0)
+        # NOTE(jigu): Explicit set pose to ensure the actor does not sleep
+        self.obj.set_pose(self.obj.pose)
+        self.obj.set_velocity(np.zeros(3))
+        self.obj.set_angular_velocity(np.zeros(3))
+        self._settle(0.5)
+
+        # Some objects need longer time to settle
+        lin_vel = np.linalg.norm(self.obj.velocity)
+        ang_vel = np.linalg.norm(self.obj.angular_velocity)
+        if lin_vel > 1e-3 or ang_vel > 1e-2:
+            self._settle(1.5)
+
+        # Record the object height after it settles
+        self.obj_height_after_settle = self.obj.pose.p[2]
 
 
-@register_env("PickSpongeOnClosedDrawerInScene-v0", max_episode_steps=10000)
-class PickSpongeOnClosedDrawerInSceneEnv(PickObjectOnDrawerInSceneEnv, CustomOtherObjectsInSceneEnv):
+@register_env("PickSpongeOnClosedDrawerInScene-v0", max_episode_steps=200)
+class PickSpongeOnClosedDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
     drawer_ids = ["top", "middle", "bottom"]
 
     def __init__(self, **kwargs):
-        super().__init__(
-            target_object_id="sponge",
-            distractor_object_ids=["opened_coke_can", "apple"],
-            **kwargs
-        )
+        super().__init__(**kwargs)
+        self.model_ids = ["sponge"]
 
 
-@register_env("PickAppleOnClosedDrawerInScene-v0", max_episode_steps=10000)
-class PickAppleOnClosedDrawerInSceneEnv(PickObjectOnDrawerInSceneEnv, CustomOtherObjectsInSceneEnv):
+@register_env("PickAppleOnClosedDrawerInScene-v0", max_episode_steps=200)
+class PickAppleOnClosedDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
     drawer_ids = ["top", "middle", "bottom"]
 
     def __init__(self, **kwargs):
-        super().__init__(
-            target_object_id="apple",
-            distractor_object_ids=["opened_coke_can", "sponge"],
-            **kwargs
-        )
+        super().__init__(**kwargs)
+        self.model_ids = ["apple"]
