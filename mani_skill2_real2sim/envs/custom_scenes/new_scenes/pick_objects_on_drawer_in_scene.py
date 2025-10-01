@@ -278,57 +278,165 @@ class PickCokeCanOnClosedDrawerInSceneEnv(PickObjectOnClosedDrawerInSceneEnv):
     drawer_ids = ["top", "middle", "bottom"]
 
     def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        self.model_ids = ["opened_coke_can"]
+    # Initialize attributes before calling super().__init__
+    # Important: pass model_ids into super().__init__ so the very first
+    # auto-reset during BaseEnv.__init__ uses the coke can, not a random model.
+    self.distractor_ids = ["sponge", "apple"]
+    self.distractor_objs = []
+
+    super().__init__(model_ids=["opened_coke_can"], **kwargs)
+
+    def _load_actors(self):
+        super()._load_actors()
+        # Load distractor objects
+        self._load_distractor_objects()
+
+    def _load_distractor_objects(self):
+        """Load distractor objects (sponge and apple)"""
+        # Clear existing distractor objects
+        self.distractor_objs = []
+
+        # Check if distractor_ids is defined (only for coke can env)
+        if not hasattr(self, 'distractor_ids') or not self.distractor_ids:
+            return
+
+        for distractor_id in self.distractor_ids:
+            distractor_density = self.model_db[distractor_id].get("density", 1000)
+            distractor_obj = self._build_actor_helper(
+                distractor_id,
+                self._scene,
+                scale=1.0,
+                density=distractor_density,
+                physical_material=self._scene.create_physical_material(
+                    static_friction=self.obj_static_friction,
+                    dynamic_friction=self.obj_dynamic_friction,
+                    restitution=0.0,
+                ),
+                root_dir=self.asset_root,
+            )
+            distractor_obj.name = distractor_id
+            distractor_obj.set_damping(0.1, 0.1)
+            self.distractor_objs.append(distractor_obj)
+
+    def _get_random_drop_locations(self, num_objects):
+                """Generate random drop locations that are on the table with spacing.
+
+                Notes:
+                - Bounds chosen to match the single-object placement region used in
+                    PickObjectOnDrawerInSceneEnv (keeps items on tabletop in the default scene).
+                - Enforce a minimum spacing to reduce immediate collisions that can
+                    push objects off the surface.
+                """
+                # Conservative tabletop bounds near the drawer area (w.r.t. world frame)
+                # Keep consistent with single-object defaults: x in [-0.10,-0.05], y in [0.00,0.10]
+                # Slightly expanded but still safely on-table
+                x_min, x_max = -0.12, -0.03
+                y_min, y_max = -0.02, 0.12
+
+                min_dist = 0.06  # 6cm separation to reduce push-offs
+                max_tries = 100
+                drop_locations = []
+
+                def far_enough(p):
+                        for q in drop_locations:
+                                if np.linalg.norm(np.array(p) - np.array(q)) < min_dist:
+                                        return False
+                        return True
+
+                for _ in range(num_objects):
+                        # rejection sampling with spacing
+                        for _try in range(max_tries):
+                                x = float(self._episode_rng.uniform(x_min, x_max))
+                                y = float(self._episode_rng.uniform(y_min, y_max))
+                                cand = [x, y]
+                                if far_enough(cand):
+                                        drop_locations.append(cand)
+                                        break
+                        else:
+                                # Fallback without spacing if too crowded (should be rare for 2-3 objs)
+                                x = float(self._episode_rng.uniform(x_min, x_max))
+                                y = float(self._episode_rng.uniform(y_min, y_max))
+                                drop_locations.append([x, y])
+
+                return drop_locations
 
     def _initialize_actors(self):
         # Keep the drawer closed (no opening needed for pick task)
         self.art_obj.set_qpos([0.0] * self.art_obj.dof)
 
-        # The object will fall from a certain initial height
-        obj_init_xy = self.obj_init_options.get("init_xy", None)
-        if obj_init_xy is None:
-            obj_init_xy = self._episode_rng.uniform([-0.10, -0.00], [-0.05, 0.1], [2])
-        obj_init_z = self.obj_init_options.get("init_z", self.scene_table_height)
-        obj_init_z = obj_init_z + 0.5  # let object fall onto the table
+        # Generate random drop locations for all objects (target + distractors)
+        all_objects = [self.obj] + (self.distractor_objs if hasattr(self, 'distractor_objs') and self.distractor_objs else [])
+        drop_locations = self._get_random_drop_locations(len(all_objects))
 
-        # Set coke can to standing (upright) orientation
-        obj_init_rot_quat = self.obj_init_options.get("init_rot_quat", euler2quat(np.pi / 2, 0, 0))
-        p = np.hstack([obj_init_xy, obj_init_z])
-        q = obj_init_rot_quat
+        # Randomly shuffle objects to assign them to random drop locations
+        shuffled_objects = all_objects.copy()
+        self._episode_rng.shuffle(shuffled_objects)
 
-        # Apply random Z rotation only (keep upright but allow rotation around vertical axis)
-        if self.obj_init_options.get("init_rand_rot_z", True):
+        # Drop height
+        drop_z = self.scene_table_height + 0.5
+
+        # Move the robot far away to avoid collision
+        self.agent.robot.set_pose(sapien.Pose([-10, 0, 0]))
+
+        # Place all objects at their assigned drop locations
+        for obj, drop_xy in zip(shuffled_objects, drop_locations):
+            p = np.hstack([drop_xy, drop_z])
+
+            # Set appropriate orientation based on object type
+            if obj == self.obj:  # Target coke can - upright
+                q = euler2quat(np.pi / 2, 0, 0)
+            else:  # Distractor objects - default orientation
+                q = [1, 0, 0, 0]
+
+            # Apply random Z rotation for variety
             ori = self._episode_rng.uniform(0, 2 * np.pi)
             q = qmult(euler2quat(0, 0, ori), q)
 
-        # Skip random axis rotation to keep can upright
-        self.obj.set_pose(sapien.Pose(p, q))
+            obj.set_pose(sapien.Pose(p, q))
 
-        # Move the robot far away to avoid collision
-        # The robot should be initialized later in _initialize_agent (in base_env.py)
-        self.agent.robot.set_pose(sapien.Pose([-10, 0, 0]))
+        # Lock objects to prevent rolling while settling
+        for obj in all_objects:
+            obj.lock_motion(0, 0, 0, 1, 1, 0)
 
-        # Lock rotation around x and y to let the target object fall onto the table
-        self.obj.lock_motion(0, 0, 0, 1, 1, 0)
         self._settle(0.5)
 
-        # Unlock motion
-        self.obj.lock_motion(0, 0, 0, 0, 0, 0)
-        # NOTE(jigu): Explicit set pose to ensure the actor does not sleep
-        self.obj.set_pose(self.obj.pose)
-        self.obj.set_velocity(np.zeros(3))
-        self.obj.set_angular_velocity(np.zeros(3))
+        # Unlock objects
+        for obj in all_objects:
+            obj.lock_motion(0, 0, 0, 0, 0, 0)
+            obj.set_pose(obj.pose)
+            obj.set_velocity(np.zeros(3))
+            obj.set_angular_velocity(np.zeros(3))
+
         self._settle(0.5)
 
-        # Some objects need longer time to settle
-        lin_vel = np.linalg.norm(self.obj.velocity)
-        ang_vel = np.linalg.norm(self.obj.angular_velocity)
-        if lin_vel > 1e-3 or ang_vel > 1e-2:
+        # Additional settling if objects are still moving
+        total_vel = sum(np.linalg.norm(obj.velocity) for obj in all_objects)
+        if total_vel > 1e-3:
             self._settle(1.5)
 
-        # Record the object height after it settles
+        # Record the target object height after it settles
         self.obj_height_after_settle = self.obj.pose.p[2]
+
+    def _get_obs_extra(self) -> OrderedDict:
+        obs = OrderedDict(
+            tcp_pose=vectorize_pose(self.tcp.pose),
+        )
+        if self._obs_mode in ["state", "state_dict"]:
+            obs.update(
+                obj_pose=vectorize_pose(self.obj_pose),
+                tcp_to_obj_pos=self.obj_pose.p - self.tcp.pose.p,
+            )
+            # Add distractor object poses
+            for i, distractor_obj in enumerate(self.distractor_objs):
+                distractor_pose = distractor_obj.pose.transform(distractor_obj.cmass_local_pose)
+                obs[f"distractor_{i}_pose"] = vectorize_pose(distractor_pose)
+                obs[f"tcp_to_distractor_{i}_pos"] = distractor_pose.p - self.tcp.pose.p
+        return obs
+
+    def reset(self, seed=None, options=None):
+    # Keep distractors across resets; they will be repositioned in _initialize_actors.
+    # Reconfigure will recreate the scene and actors as needed.
+    return super().reset(seed=seed, options=options)
 
 
 @register_env("PickSpongeOnClosedDrawerInScene-v0", max_episode_steps=200)
