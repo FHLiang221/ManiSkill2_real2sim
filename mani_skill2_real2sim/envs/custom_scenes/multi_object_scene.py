@@ -519,7 +519,7 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         rgb_overlay_paths = [
             str(ASSET_DIR / f"real_inpainting/open_drawer_{i}.png") for i in overlay_ids
         ]
-        robot_init_xs = [0.644, 0.765, 0.889, 0.652, 0.752, 0.851, 0.665, 0.765, 0.865]
+        robot_init_xs = [0.644, 0.652, 0.665, 0.620, 0.630, 0.640, 0.650, 0.660, 0.670]
         robot_init_ys = [
             -0.179,
             -0.182,
@@ -603,9 +603,9 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
 
             consecutive_grasp = self.consecutive_grasp >= 5
             diff_obj_height = self.obj.pose.p[2] - self.obj_height_after_settle
-            self.lifted_obj = self.lifted_obj or (flag and (diff_obj_height > 0.08))
+            self.lifted_obj = self.lifted_obj or (flag and (diff_obj_height > 0.05))
             lifted_object_significantly = self.lifted_obj and (
-                diff_obj_height > 0.08
+                diff_obj_height > 0.05
             )
 
             if self.require_lifting_obj_for_success:
