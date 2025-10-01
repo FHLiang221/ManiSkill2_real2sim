@@ -137,11 +137,9 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
 
         # load the main object as the object, and everything else as distractors
         model_to_load = self.task[2] if self.task[0] == "object" else None
-        print(f"DEBUG: _load_models called, model_to_load: {model_to_load}, task: {self.task}")
 
         self.distractor_objs = []
         for model_id in self.model_ids:
-            print(f"DEBUG: Processing model_id: {model_id}")
             if model_to_load == model_id:
                 self.model_id = model_id
                 
@@ -251,7 +249,6 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         self._load_models()
         
     def _initialize_actors(self):
-        print(f"DEBUG: _initialize_actors called, self.obj: {self.obj}, self.model_id: {getattr(self, 'model_id', 'NOT_SET')}")
         obj_init_options = self.obj_init_options.get(getattr(self, 'model_id', None), {})
         
         # The object will fall from a certain initial height
@@ -407,27 +404,19 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         # only keep this logged for open drawer tasks?
         self.joint_names = [j.name for j in self.art_obj.get_active_joints()]
         if hasattr(self, 'task') and self.task[0] == "drawer":
-            print(f"DEBUG: Loading drawer {self.drawer_id}, joint_names: {self.joint_names}")
-            print(f"DEBUG: About to call get_entity_by_name for {self.drawer_id}_drawer")
             self.drawer_obj = get_entity_by_name(
                 self.art_obj.get_links(), f"{self.drawer_id}_drawer"
             )
-            print(f"DEBUG: get_entity_by_name succeeded, drawer_obj: {self.drawer_obj}")
-            print(f"DEBUG: About to get joint index for {self.drawer_id}_drawer_joint")
             self.joint_idx = self.joint_names.index(f"{self.drawer_id}_drawer_joint")
-            print(f"DEBUG: joint_idx set to: {self.joint_idx}")
 
     def reset(self, seed=None, options=None):
         # remove distractor objects
-        print(f"DEBUG: Cleaning up objects, distractor_objs: {len(getattr(self, 'distractor_objs', []))}")
         for distractor_obj in getattr(self, 'distractor_objs', []):
             self._scene.remove_actor(distractor_obj)
-        print("Remove all distractor objects")
         self.distractor_objs = []
 
         # Also clean up main object if it exists
         if hasattr(self, 'obj') and self.obj is not None:
-            print(f"DEBUG: Removing main object: {self.obj}")
             self._scene.remove_actor(self.obj)
             self.obj = None
 
@@ -459,19 +448,14 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
 
         if self.task[0] == "drawer":
             self.joint_idx = self.joint_names.index(f"{self.drawer_id}_drawer_joint")
-            print(f"DEBUG: In reset(), set joint_idx to {self.joint_idx}")
 
-        print(f"DEBUG: About to handle drawer positioning")
         # keep top drawer closed (do nothing)
 
         # open the bottom drawer
-        print(f"DEBUG: Setting bottom drawer position, art_obj.dof: {self.art_obj.dof}")
         bottom_drawer_joint_idx = self.joint_names.index(f"bottom_drawer_joint")
         tmp = [0.0] * self.art_obj.dof
         tmp[bottom_drawer_joint_idx] = 0.2
-        print(f"DEBUG: Before set_qpos, tmp: {tmp}")
         self.art_obj.set_qpos(tmp)
-        print(f"DEBUG: After set_qpos")
 
 
         # set the object            
@@ -539,7 +523,7 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         rgb_overlay_paths = [
             str(ASSET_DIR / f"real_inpainting/open_drawer_{i}.png") for i in overlay_ids
         ]
-        robot_init_xs = [0.644, 0.652, 0.665, 0.620, 0.630, 0.640, 0.650, 0.660, 0.670]
+        robot_init_xs = [0.670, 0.680, 0.690, 0.700, 0.710, 0.720, 0.675, 0.685, 0.695]
         robot_init_ys = [
             -0.179,
             -0.182,
