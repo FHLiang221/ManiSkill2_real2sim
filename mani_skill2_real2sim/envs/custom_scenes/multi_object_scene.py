@@ -16,7 +16,7 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
     # drawer_ids: List[str]
     model_ids = [
         "opened_coke_can",
-        "apple"
+        "apple",
         "sponge",
     ]
     task_info: List[Tuple[str, str]]
@@ -55,13 +55,13 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         
         self.obj_init_options = {  # obj initialization options, v
             "opened_coke_can": {
-                "init_xy": [-0.05, 0.03],
+                "init_xy": np.array([-0.05, 0.03]),
             },
             "apple": {
-                "init_xy": [-0.05, 0.15],
+                "init_xy": np.array([-0.05, 0.15]),
             },
             "sponge": {
-                "init_xy": [-0.05, -0.15],
+                "init_xy": np.array([-0.05, -0.15]),
             }
         }
         self.distractor_obj_init_options = {
@@ -136,13 +136,20 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         ]
 
         # load the main object as the object, and everything else as distractors
-        model_to_load = self.task[2] if self.task[0] == "object" else None
+        # For drawer tasks, always load all objects; for object tasks, load target as main obj
+        if self.task[0] == "object":
+            model_to_load = self.task[2]
+        else:
+            # For drawer tasks, load all objects as distractors (no main object)
+            model_to_load = None
+
+        print(f"DEBUG _load_models: task={self.task}, model_to_load={model_to_load}, use_distractors={self.use_distractors}")
 
         self.distractor_objs = []
         for model_id in self.model_ids:
             if model_to_load == model_id:
                 self.model_id = model_id
-                
+
                 density = self.model_db[self.model_id].get("density", 1000)
 
                 self.obj = self._build_actor_helper(
@@ -159,9 +166,10 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
                 )
                 self.obj.name = model_id
             else:
-                if not self.use_distractors:
+                # For drawer tasks, always load all objects regardless of use_distractors flag
+                if not self.use_distractors and self.task[0] != "drawer":
                     continue
-                
+
                 distractor_obj = self._build_actor_helper(
                     model_id,
                     self._scene,
@@ -178,11 +186,13 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
                 )
                 distractor_obj.name = model_id
                 self.distractor_objs.append(distractor_obj)
-                
+
         # HACK: if the object doesn't exist, set it accordingly
         if self.obj is None:
             self.obj = self.distractor_objs[0]
             self.distractor_objs = self.distractor_objs[1:]
+
+        print(f"DEBUG _load_models end: obj={self.obj.name if self.obj else None}, distractors={[d.name for d in self.distractor_objs]}")
             
             
     # def _get_default_scene_config(self):
@@ -249,10 +259,19 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
         self._load_models()
         
     def _initialize_actors(self):
-        obj_init_options = self.obj_init_options.get(getattr(self, 'model_id', None), {})
-        
+        # For drawer tasks, all objects should use their fixed positions
+        # For object tasks, get the main object's init options
+        if self.task[0] == "drawer":
+            # For drawer tasks, initialize all objects with their fixed positions
+            # Get the first object's (self.obj) init options
+            obj_init_options = self.obj_init_options.get(self.obj.name, {})
+        else:
+            # For object tasks, use the model_id
+            obj_init_options = self.obj_init_options.get(getattr(self, 'model_id', None), {})
+
         # The object will fall from a certain initial height
         obj_init_xy = obj_init_options.get("init_xy", None)
+        print(f"DEBUG _initialize_actors: task={self.task}, obj.name={self.obj.name}, obj_init_xy={obj_init_xy}")
         if obj_init_xy is None:
             obj_init_xy = self._episode_rng.uniform(
                 [-0.08, -0.02], [-0.02, 0.08], [2]
@@ -324,21 +343,29 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
                 distractor_init_xy = distractor_obj_init_options.get(
                     "init_xy", None
                 )
+                print(f"DEBUG distractor: {distractor_obj.name}, init_xy={distractor_init_xy}")
 
+                # For drawer tasks, always use fixed positions; for object tasks, allow randomization
                 if distractor_init_xy is None:
-                    while True:
-                        distractor_init_xy = (
-                            obj_init_xy
-                            + self._episode_rng.uniform(-0.05, 0.05, [2])
-                        )  # hardcoded for now
-                        distractor_init_xy = np.clip(
-                            distractor_init_xy, [-0.08, -0.02], [-0.02, 0.08]
-                        )
-                        if (
-                            np.linalg.norm(distractor_init_xy - obj_init_xy)
-                            > 0.03
-                        ):
-                            break
+                    if self.task[0] == "drawer":
+                        # This should not happen for drawer tasks as all objects have fixed positions
+                        print(f"WARNING: No fixed position for {distractor_obj.name} in drawer task!")
+                        distractor_init_xy = np.array([0.0, 0.0])  # fallback
+                    else:
+                        # For object tasks, randomize distractor positions
+                        while True:
+                            distractor_init_xy = (
+                                obj_init_xy
+                                + self._episode_rng.uniform(-0.05, 0.05, [2])
+                            )  # hardcoded for now
+                            distractor_init_xy = np.clip(
+                                distractor_init_xy, [-0.08, -0.02], [-0.02, 0.08]
+                            )
+                            if (
+                                np.linalg.norm(distractor_init_xy - obj_init_xy)
+                                > 0.03
+                            ):
+                                break
 
                 p = np.hstack(
                     [distractor_init_xy, obj_init_z]
@@ -515,6 +542,20 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
                 "light_mode": self.light_mode,
             }
         )
+
+        # Ensure object is properly initialized for object tasks
+        if self.task[0] == "object" and self.obj is None:
+            # Force initialization by calling initialize_episode again if needed
+            print(f"DEBUG: self.obj is None after reset, calling initialize_episode again")
+            self.initialize_episode()
+            if self.obj is None:
+                print(f"DEBUG: self.obj is still None after initialize_episode! Task: {self.task}")
+                # Something is fundamentally wrong with initialization
+                # Let's try to manually trigger object creation
+                self._load_actors()
+                self._initialize_actors()
+                print(f"DEBUG: After manual _load_actors and _initialize_actors: self.obj = {self.obj}")
+
         return obs, info
 
     def _additional_prepackaged_config_reset(self, options):
@@ -665,7 +706,7 @@ class MultiObjectOpenDrawerInSceneEnv(CustomOtherObjectsInSceneEnv): # CustomSce
 class CustomMultiObjectOpenDrawerInSceneEnv(MultiObjectOpenDrawerInSceneEnv):
     model_ids = [
         "opened_coke_can",
-        "apple"
+        "apple",
         "sponge",
     ]
 
